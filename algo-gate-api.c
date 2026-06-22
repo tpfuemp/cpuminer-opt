@@ -67,6 +67,7 @@ void do_nothing   () {}
 bool return_true  () { return true;  }
 bool return_false () { return false; }
 void *return_null () { return NULL;  }
+size_t return_zero() { return 0;     }  /* default get_workspace_size */
 
 void algo_not_tested()
 {
@@ -267,6 +268,7 @@ static void init_algo_gate( algo_gate_t* gate )
 //   gate->do_this_thread          = (void*)&return_true;
    gate->longpoll_rpc_call       = (void*)&std_longpoll_rpc_call;
    gate->get_work_data_size      = (void*)&std_get_work_data_size;
+   gate->get_workspace_size      = (void*)&return_zero;
    gate->optimizations           = EMPTY_SET;
    gate->ntime_index             = STD_NTIME_INDEX;
    gate->nbits_index             = STD_NBITS_INDEX;
@@ -309,6 +311,11 @@ bool register_algo_gate( int algo, algo_gate_t *gate )
     case ALGO_C11:          rc = register_c11_algo           ( gate ); break;
     case ALGO_DEEP:         rc = register_deep_algo          ( gate ); break;
     case ALGO_DMD_GR:       rc = register_dmd_gr_algo        ( gate ); break;
+    case ALGO_EQUIHASH:     rc = register_equihash_algo      ( gate ); break;
+    case ALGO_EQUIHASH96:   rc = register_equihash96_algo    ( gate ); break;
+    case ALGO_EQUIHASH125:  rc = register_equihash125_algo   ( gate ); break;
+    case ALGO_EQUIHASH144:  rc = register_equihash144_algo   ( gate ); break;
+    case ALGO_EQUIHASH192:  rc = register_equihash192_algo   ( gate ); break;
     case ALGO_GROESTL:      rc = register_groestl_algo       ( gate ); break;
     case ALGO_HEX:          rc = register_hex_algo           ( gate ); break;
     case ALGO_HMQ1725:      rc = register_hmq1725_algo       ( gate ); break;
@@ -438,6 +445,17 @@ const char* const algo_alias_map[][2] =
   { "phi",               "phi1612"        },
   { "scryptn2",          "scrypt:1048576" },
   { "sib",               "x11gost"        },
+  /* Equihash coin aliases */
+  { "btg",               "equihash144"    },   /* Bitcoin Gold            */
+  { "bitcoingold",       "equihash144"    },
+  { "flux",              "equihash125"    },   /* Flux / ZelCash          */
+  { "zelcash",           "equihash125"    },
+  { "zel",               "equihash125"    },
+  { "horizen",           "equihash"       },   /* Horizen (ZEN) = 200/9  */
+  { "komodo",            "equihash"       },   /* Komodo = 200/9          */
+  { "zcash",             "equihash"       },   /* ZCash = 200/9           */
+  { "zec",               "equihash"       },
+  { "zen",               "equihash"       },
   { "timetravel8",       "timetravel"     },
   { "veil",              "x16rt-veil"     },
   { "x16r-hex",          "hex"            },

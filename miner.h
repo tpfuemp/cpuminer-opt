@@ -326,7 +326,10 @@ struct thr_api {
 #define JSON_RPC_QUIET_404	(1 << 1)
 #define JSON_RPC_IGNOREERR  (1 << 2)
 
-#define JSON_BUF_LEN 512
+/* Equihash submit needs ~3000 chars (64-char nonce + 2694-char solution).
+ * Keep 512 as default but algo gates may allocate their own buffer. */
+#define JSON_BUF_LEN     512
+#define JSON_BUF_LEN_EQH 3200
 
 #define CL_N    "\x1B[0m"
 #define CL_RED  "\x1B[31m"
@@ -440,6 +443,8 @@ void   cpu_brand_string( char* s );
 float cpu_temp( int core );
 */
 
+uint64_t available_system_memory(void);  // bytes currently free for new allocs
+
 struct work
 {
    uint32_t target[8] __attribute__ ((aligned (64)));
@@ -456,6 +461,10 @@ struct work
 	unsigned char *xnonce2;
    bool sapling;
    bool stale;
+   /* Equihash: holds the current valid solution (1344 bytes for 200/9).
+    * Set by scanhash_equihash before calling submit_solution. */
+   unsigned char *equihash_solution;
+   uint16_t       equihash_solution_len;
 } __attribute__ ((aligned (WORK_ALIGNMENT)));
 
 struct stratum_job
@@ -476,6 +485,15 @@ struct stratum_job
    bool clean;
    // for x16rt-veil
    unsigned char extra[64];
+   /* Equihash Stratum: fields sent directly by pool (no coinbase building)  */
+   unsigned char merkleroot[32];
+   unsigned char reserved[32];    /* "finalsaplingroot" in newer pools      */
+   bool is_equihash;
+   /* Extended Equihash notify params[8] and params[9]:
+    *   eq_params  e.g. "200_9", "144_5", "96_5"
+    *   eq_personal e.g. "ZcashPoW", "BgoldPoW"  (8 chars, pool-sent)     */
+   char eq_params[16];
+   char eq_personal[16];
    unsigned char denom10[32];
    unsigned char denom100[32];
    unsigned char denom1000[32];
@@ -597,6 +615,11 @@ enum algos {
         ALGO_C11,         
         ALGO_DEEP,
         ALGO_DMD_GR,
+        ALGO_EQUIHASH,       /* 200/9 — ZCash, Horizen, Komodo     */
+        ALGO_EQUIHASH96,     /*  96/5 — small memory variant       */
+        ALGO_EQUIHASH125,    /* 125/4 — Flux / ZelCash             */
+        ALGO_EQUIHASH144,    /* 144/5 — Bitcoin Gold (BTG)         */
+        ALGO_EQUIHASH192,    /* 192/7 — ZeroClassic                */
         ALGO_GROESTL,     
         ALGO_HEX,
         ALGO_HMQ1725,
@@ -694,6 +717,11 @@ static const char* const algo_names[] = {
         "c11",
         "deep",
         "dmd-gr",
+        "equihash",
+        "equihash96",
+        "equihash125",
+        "equihash144",
+        "equihash192",
         "groestl",
         "hex",
         "hmq1725",
@@ -856,6 +884,14 @@ Options:\n\
                           c11           Chaincoin\n\
                           deep          Deepcoin (DCN)\n\
                           dmd-gr        Diamond\n\
+                          equihash      Zcash/ZEC, Horizen/ZEN, Komodo/KMD (200/9, ~210 MB)\n\
+                            Aliases: zcash, zec, zen, horizen, komodo\n\
+                          equihash96    Equihash 96/5 (~7 MB)\n\
+                          equihash144   Bitcoin Gold/BTG (144/5, ~2.2 GB)\n\
+                            Aliases: btg, bitcoingold\n\
+                          equihash192   ZeroClassic (192/7, ~3 GB)\n\
+                          equihash125   Flux/ZelCash (125/4, ~4 GB)\n\
+                            Aliases: flux, zelcash, zel\n\
                           groestl       Groestl coin\n\
                           hex           x16r-hex\n\
                           hmq1725       Espers\n\

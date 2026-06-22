@@ -46,6 +46,59 @@
 #include <windows.h>
 #endif
 
+/* ── available_system_memory() ───────────────────────────────────────────
+ * Returns bytes of physical memory currently available for new allocations.
+ * Returns 0 on any failure; callers must treat 0 as "unknown, skip cap".
+ *
+ * Defined here (not in sysinfos.c) because sysinfos.c is #include'd into
+ * multiple translation units; putting it here ensures exactly one definition.
+ */
+uint64_t available_system_memory(void)
+{
+#if defined(WIN32) || defined(_WIN64)
+    MEMORYSTATUSEX ms;
+    ms.dwLength = sizeof(ms);
+    if ( GlobalMemoryStatusEx(&ms) )
+        return (uint64_t)ms.ullAvailPhys;
+    return 0;
+
+#elif defined(__linux__)
+    /* MemAvailable (kernel 3.14+) is the most accurate; fall back to MemFree */
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (!f) return 0;
+    uint64_t avail = 0, freemem = 0;
+    char line[128];
+    while ( fgets(line, sizeof(line), f) ) {
+        unsigned long long kb;
+        if ( sscanf(line, "MemAvailable: %llu kB", &kb) == 1 ) {
+            avail = (uint64_t)kb * 1024ULL;
+            break;
+        }
+        if ( sscanf(line, "MemFree: %llu kB", &kb) == 1 )
+            freemem = (uint64_t)kb * 1024ULL;
+    }
+    fclose(f);
+    return avail ? avail : freemem;
+
+#elif defined(__APPLE__)
+    uint64_t page_size = (uint64_t)getpagesize();
+    FILE *f = popen("vm_stat", "r");
+    if (!f) return 0;
+    uint64_t free_pages = 0, inactive_pages = 0;
+    char line[128];
+    while ( fgets(line, sizeof(line), f) ) {
+        unsigned long long n;
+        if ( sscanf(line, "Pages free: %llu.", &n) == 1 )     free_pages     = n;
+        if ( sscanf(line, "Pages inactive: %llu.", &n) == 1 ) inactive_pages = n;
+    }
+    pclose(f);
+    return (free_pages + inactive_pages) * page_size;
+
+#else
+    return 0;
+#endif
+}
+
 #ifdef _MSC_VER
 #include <stdint.h>
 #else
@@ -117,6 +170,7 @@ char* opt_param_key = NULL;
 int opt_param_n = 0;
 int opt_param_r = 0;
 int opt_n_threads = 0;
+static bool opt_n_threads_set = false;   /* true when -t was explicitly given */
 bool opt_sapling = false;
 static uint64_t opt_affinity = 0xFFFFFFFFFFFFFFFFULL;  // default, use all cores
 int opt_priority = 0;  // deprecated
@@ -367,6 +421,7 @@ void work_free(struct work *w)
 	if (w->workid) free(w->workid);
 	if (w->job_id) free(w->job_id);
 	if (w->xnonce2) free(w->xnonce2);
+   if (w->equihash_solution) free(w->equihash_solution);
 }
 
 void work_copy(struct work *dest, const struct work *src)
@@ -382,6 +437,11 @@ void work_copy(struct work *dest, const struct work *src)
 		dest->xnonce2 = (uchar*) malloc(src->xnonce2_len);
 		memcpy(dest->xnonce2, src->xnonce2, src->xnonce2_len);
 	}
+   if (src->equihash_solution && src->equihash_solution_len) {
+      dest->equihash_solution = (uchar*) malloc(src->equihash_solution_len);
+      memcpy(dest->equihash_solution, src->equihash_solution,
+             src->equihash_solution_len);
+   }
 }
 
 int std_get_work_data_size() { return STD_WORK_DATA_SIZE; }
@@ -1440,10 +1500,19 @@ static bool submit_upstream_work( CURL *curl, struct work *work )
 {
    if ( have_stratum )
    {
-       char req[JSON_BUF_LEN];
+       /* Equihash solutions are large (~800+ hex chars for solution alone).
+        * Use heap allocation so solution-heavy algos don't smash the stack. */
+       char *req = (char *)malloc( JSON_BUF_LEN_EQH );
+       if ( !req )
+       {
+          applog(LOG_ERR, "submit_upstream_work: OOM allocating req buffer");
+          return false;
+       }
        stratum.sharediff = work->sharediff;
        algo_gate.build_stratum_request( req, work, &stratum );
-       if ( unlikely( !stratum_send_line( &stratum, req ) ) )
+       bool send_ok = stratum_send_line( &stratum, req );
+       free( req );
+       if ( unlikely( !send_ok ) )
        {
           applog(LOG_ERR, "submit_upstream_work stratum_send_line failed");
           return false;
@@ -1829,7 +1898,7 @@ static void update_submit_stats( struct work *work, const void *hash )
    share_stats[ s_put_ptr ].share_diff = work->sharediff;
    share_stats[ s_put_ptr ].net_diff = net_diff;
    share_stats[ s_put_ptr ].stratum_diff = stratum_diff;
-   share_stats[ s_put_ptr ].target_diff = work->targetdiff;
+   share_stats[ s_put_ptr ].target_diff = work->targetdiff * opt_target_factor;
    share_stats[ s_put_ptr ].height = work->height; 
    if ( have_stratum )
       strncpy( share_stats[ s_put_ptr ].job_id, work->job_id, 30 );
@@ -1845,7 +1914,11 @@ bool submit_solution( struct work *work, const void *hash,
 //   if ( !opt_quiet && work_restart[ thr->id ].restart )
 //      applog( LOG_INFO, CL_LBL "Share may be stale, submitting anyway..." CL_N );
    
-   work->sharediff = hash_to_diff( hash );
+   /* Display/stats difficulty in pool scale. opt_target_factor is 1.0 for
+    * normal algos (no change) and EQH_DIFF_SCALE for equihash, matching the
+    * scaling applied to net_diff and the displayed targetdiff. Without this
+    * equihash shares were reported ~16.7M x too small (internal scale).     */
+   work->sharediff = hash_to_diff( hash ) * opt_target_factor;
    if ( likely( submit_work( thr, work ) ) )
    {
      update_submit_stats( work, hash );
@@ -2018,7 +2091,24 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
                            / ( opt_target_factor * opt_diff_factor );
    memcpy( g_work->xnonce2, sctx->job.xnonce2, sctx->xnonce2_size );
    algo_gate.build_extraheader( g_work, sctx );
-   net_diff = nbits_to_diff( g_work->data[ algo_gate.nbits_index ] );
+   /* nbits_to_diff uses 0xFFFF as the Bitcoin difficulty-1 base.
+    * opt_target_factor corrects to the pool's difficulty scale when set.
+    * For standard algos opt_target_factor=1, so net_diff is unchanged.
+    * For equihash opt_target_factor=EQH_DIFF_SCALE=16776960 puts net_diff
+    * in the same units as stratum_diff (pool-reported difficulty).          */
+   /* nbits_to_diff expects the compact-bits word with the exponent in the
+    * low byte (the be32enc form standard algos store). Equihash keeps the
+    * raw little-endian header bytes (exponent in the high byte) because its
+    * data buffer is the literal hashed header, so byte-swap for the diff
+    * calc only — the header bytes are left untouched. Without this the
+    * exponent reads as garbage, nbits_to_diff hits its slow path and returns
+    * 0, so net_diff displayed as 0.                                         */
+   uint32_t nbits_word = g_work->data[ algo_gate.nbits_index ];
+   if ( opt_algo == ALGO_EQUIHASH    || opt_algo == ALGO_EQUIHASH96  ||
+        opt_algo == ALGO_EQUIHASH125 || opt_algo == ALGO_EQUIHASH144 ||
+        opt_algo == ALGO_EQUIHASH192 )
+      nbits_word = bswap_32( nbits_word );
+   net_diff = nbits_to_diff( nbits_word ) * opt_target_factor;
    algo_gate.set_work_data_endian( g_work );
    diff_to_hash( g_work->target, g_work->targetdiff );
 
@@ -2079,8 +2169,12 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
 
     if ( new_job && !opt_quiet )
     {
+       /* targetdiff is stored in internal scale (for diff_to_hash).
+        * Multiply by opt_target_factor to display in pool scale.
+        * net_diff is already scaled above. stratum_diff is pool scale. */
        applog2( LOG_INFO, "Diff: Net %.5g, Stratum %.5g, Target %.5g",
-                          net_diff, stratum_diff, g_work->targetdiff );
+                          net_diff, stratum_diff,
+                          g_work->targetdiff * opt_target_factor );
 
        if ( likely( hr > 0. ) )
        {
@@ -2286,11 +2380,12 @@ static void *miner_thread( void *userdata )
 
        // Select nonce range based on max64, the estimated number of hashes
        // to meet the desired scan time.
-       // Initial value arbitrarilly set to 1000 just to get
-       // a sample hashrate for the next time.
+       // For fast algos (SHA256d etc.) max64 is millions; for slow algos
+       // (equihash ~0.03 Sol/s) it rounds to 0 — use 1 not 1000 as the
+       // minimum so slow algos do 1 iteration per call, not 1000.
        uint32_t work_nonce = *nonceptr;
        if ( max64 <= 0)
-          max64 = 1000;
+          max64 = 1;
        if ( work_nonce + max64 > end_nonce )
           max_nonce = end_nonce;
        else
@@ -3173,6 +3268,7 @@ void parse_arg(int key, char *arg )
 		if (v < 0 || v > 9999) /* sanity check */
 			show_usage_and_exit(1);
 		opt_n_threads = v;
+		opt_n_threads_set = true;
 		break;
 	case 'u':  // user
 		free(rpc_user);
@@ -3592,6 +3688,38 @@ int main(int argc, char *argv[])
    // Would need to split register function into 2 parts. First part sets algo
    // optimizations but no logging, second part does any logging.   
    if ( !register_algo_gate( opt_algo, &algo_gate ) )  exit(1);
+
+   /* Auto-cap thread count for memory-intensive algorithms.
+    * Only runs when the user did NOT explicitly pass -t.
+    * Leaves 20 % of available memory as a safety margin.                  */
+   if ( !opt_n_threads_set ) {
+      size_t ws = algo_gate.get_workspace_size();
+      if ( ws > 0 ) {
+         uint64_t avail = available_system_memory();
+         if ( avail > 0 ) {
+            uint64_t usable  = (uint64_t)( avail * 0.80 );
+            int      cap     = (int)( usable / ws );
+            if ( cap < 1 ) cap = 1;
+            if ( cap < opt_n_threads ) {
+               applog( LOG_WARNING,
+                  "Available RAM %.0f MB, per-thread workspace %.0f MB — "
+                  "capping threads %d → %d to prevent OOM.  "
+                  "Use -t to override.",
+                  avail  / (1024.0 * 1024.0),
+                  ws     / (1024.0 * 1024.0),
+                  opt_n_threads, cap );
+               opt_n_threads = cap;
+            } else {
+               applog( LOG_INFO,
+                  "Memory check: %.0f MB available, %.0f MB/thread — "
+                  "%d thread(s) OK",
+                  avail / (1024.0 * 1024.0),
+                  ws    / (1024.0 * 1024.0),
+                  opt_n_threads );
+            }
+         }
+      }
+   }
 
    if ( !check_cpu_capability() ) exit(1);
    

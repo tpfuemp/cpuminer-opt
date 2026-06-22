@@ -80,6 +80,8 @@ cpuminer_SOURCES = \
   algo/cubehash/cubehash_sse2.c\
   algo/cubehash/cube-hash-2way.c \
   algo/cubehash/sph_cubehash.c \
+  algo/equihash/equihash.c \
+  algo/equihash/equihash-gate.c \
   algo/echo/sph_echo.c \
   algo/echo/echo-hash-4way.c \
   algo/echo/aes_ni/hash.c\
