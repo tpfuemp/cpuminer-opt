@@ -61,9 +61,19 @@ typedef struct {
     uint32_t *bucket_size;    /* nbuckets entries                        */
     uint32_t  round_cnt[12];  /* k+1 entries (k ≤ 10)                   */
     eh_params_t params;       /* copy of parameters used to build this   */
-    void     *_base;          /* raw malloc pointer (for free)           */
-    size_t    _size;          /* total allocation in bytes               */
+    void     *_base;          /* raw buffer pointer (for free)           */
+    size_t    _size;          /* allocated bytes (rounded for huge pages)*/
+    int       _mem_kind;      /* allocator used (eh_mem_kind_t) for free */
 } eh_workspace_t;
+
+/* How _base was allocated, so eh_workspace_free uses the matching deallocator
+ * (munmap / VirtualFree must NOT be free()d). See item 3 in the optimization
+ * plan (huge-page workspace).                                                 */
+typedef enum {
+    EH_MEM_MALLOC = 0,   /* plain malloc()                / free()          */
+    EH_MEM_MMAP   = 1,   /* Linux mmap (HUGETLB or THP)   / munmap()        */
+    EH_MEM_VALLOC = 2,   /* Windows VirtualAlloc large pg / VirtualFree()   */
+} eh_mem_kind_t;
 
 /* Compute required workspace bytes for given parameters. */
 size_t eh_workspace_bytes(const eh_params_t *p);
@@ -109,5 +119,50 @@ int equihash_solve(const uint8_t *header, eh_workspace_t *ws,
 /* Verify a packed solution against a header.  Returns true if valid. */
 bool equihash_verify(const uint8_t *header, const eh_params_t *p,
                      const uint8_t *solution, size_t sol_len);
+
+/* ── Solver backend (reference vs optimized split) ───────────────────────── */
+
+/* The three hot kernels are dispatched through this vtable so an optimized
+ * (SIMD/NEON) backend can replace them without touching the arch-neutral
+ * orchestration, workspace, reconstruction, packing or verifier in equihash.c.
+ * See docs/EQUIHASH_OPTIMIZATION_PLAN.md, item 0.
+ *
+ *   gen_hashes   : fill hbuf0 with Blake2b+ExpandArray hashes for all indices
+ *   bucket_sort  : counting-sort hbuf0[0..n_src) into hbuf1 by collision group,
+ *                  populating sort_orig[] and bucket_start[]/bucket_size[]
+ *   wagner_round : merge colliding pairs from hbuf1 into hbuf0, record pairs[],
+ *                  return the number of output rows (<= max_out)              */
+typedef struct {
+    const char *name;
+    void     (*gen_hashes)  (const uint8_t *header, eh_workspace_t *ws);
+    void     (*bucket_sort) (uint32_t n_src, eh_workspace_t *ws);
+    uint32_t (*wagner_round)(int round, uint32_t n_in, uint32_t max_out,
+                             eh_workspace_t *ws);
+} eh_backend_t;
+
+/* Reference kernels, exposed so optimized backends can reuse the ones they
+ * have not specialized yet (equihash-ref.c). */
+void     eh_ref_gen_hashes  (const uint8_t *header, eh_workspace_t *ws);
+void     eh_ref_bucket_sort (uint32_t n_src, eh_workspace_t *ws);
+uint32_t eh_ref_wagner_round(int round, uint32_t n_in, uint32_t max_out,
+                             eh_workspace_t *ws);
+
+/* Scalar reference backend — always compiled; correctness oracle (equihash-ref.c). */
+extern const eh_backend_t eh_backend_ref;
+
+/* Optimized backend — Blake2b midstate hash-gen now; SIMD later
+ * (equihash-simd.c). Reuses the reference bucket_sort/wagner_round until those
+ * are specialized. Must produce byte-identical output to the reference.       */
+extern const eh_backend_t eh_backend_simd;
+
+/* Differential oracle: run the reference and optimized backends on the same
+ * input and confirm identical output. Returns true if they agree (or if only
+ * the reference exists). Used to gate backend selection.                      */
+bool eh_backend_selftest(void);
+
+/* Active backend. Returns the optimized backend iff it passed the differential
+ * self-test, otherwise the reference. Result is cached after first call;
+ * trigger it once single-threaded (at registration) before miner threads run. */
+const eh_backend_t *eh_active_backend(void);
 
 #endif /* EQUIHASH_H */

@@ -531,6 +531,15 @@ static void eh_run_selftests_once(void)
     if (done) return;
     done = true;
 
+    /* Resolve and report the solver backend. This triggers the differential
+     * oracle (optimized vs reference gen_hashes) once, single-threaded, before
+     * any miner thread runs — if the optimized backend diverges it falls back
+     * to the reference automatically.                                         */
+    const eh_backend_t *be = eh_active_backend();
+    applog(LOG_BLUE, "EH backend: %s%s", be->name,
+           be == &eh_backend_ref ? " (optimized backend failed self-test, "
+                                    "using reference)" : "");
+
     int nrun = 0, npass = 0;
     /* Embedded vectors could be added here once a verified pair is available;
      * for now everything comes from the user-supplied file.                   */
