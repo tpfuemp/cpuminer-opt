@@ -15,6 +15,17 @@
 #include "../simd/sph_simd.h"
 #include "../skein/sph_skein.h"
 #include "../whirlpool/sph_whirlpool.h"
+
+// Optimized single-hash cores (same algorithms, faster implementations; output
+// is bit-identical to the sph reference). Mirrors x16r's scalar dispatch.
+#include "../blake/blake512-hash.h"
+#include "../luffa/luffa_for_sse2.h"
+#include "../cubehash/cubehash_sse2.h"
+#if defined(__AES__) || defined(__ARM_FEATURE_AES)
+  #include "../groestl/aes_ni/hash-groestl.h"
+  #include "../echo/aes_ni/hash_api.h"
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -103,17 +114,22 @@ static void doCoreAlgo( uint8_t algo, const void *in, void *hash, int size )
    switch ( algo )
    {
       case BLAKE:
-      {  sph_blake512_context ctx;
-         sph_blake512_init( &ctx ); sph_blake512( &ctx, in, size );
-         sph_blake512_close( &ctx, hash ); break; }
+      {  blake512_context ctx;
+         blake512_init( &ctx ); blake512_update( &ctx, in, size );
+         blake512_close( &ctx, hash ); break; }
       case BMW:
       {  sph_bmw512_context ctx;
          sph_bmw512_init( &ctx ); sph_bmw512( &ctx, in, size );
          sph_bmw512_close( &ctx, hash ); break; }
       case GROESTL:
+#if defined(__AES__) || defined(__ARM_FEATURE_AES)
+      {  hashState_groestl ctx;
+         groestl512_full( &ctx, hash, in, (uint64_t)size << 3 ); break; }
+#else
       {  sph_groestl512_context ctx;
          sph_groestl512_init( &ctx ); sph_groestl512( &ctx, in, size );
          sph_groestl512_close( &ctx, hash ); break; }
+#endif
       case SKEIN:
       {  sph_skein512_context ctx;
          sph_skein512_init( &ctx ); sph_skein512( &ctx, in, size );
@@ -127,13 +143,11 @@ static void doCoreAlgo( uint8_t algo, const void *in, void *hash, int size )
          sph_keccak512_init( &ctx ); sph_keccak512( &ctx, in, size );
          sph_keccak512_close( &ctx, hash ); break; }
       case LUFFA:
-      {  sph_luffa512_context ctx;
-         sph_luffa512_init( &ctx ); sph_luffa512( &ctx, in, size );
-         sph_luffa512_close( &ctx, hash ); break; }
+      {  hashState_luffa ctx;
+         luffa_full( &ctx, hash, 512, in, size ); break; }
       case CUBEHASH:
-      {  sph_cubehash512_context ctx;
-         sph_cubehash512_init( &ctx ); sph_cubehash512( &ctx, in, size );
-         sph_cubehash512_close( &ctx, hash ); break; }
+      {  cubehashParam ctx;
+         cubehash_full( &ctx, hash, 512, in, size ); break; }
       case SHAVITE:
       {  sph_shavite512_context ctx;
          sph_shavite512_init( &ctx ); sph_shavite512( &ctx, in, size );
@@ -143,9 +157,14 @@ static void doCoreAlgo( uint8_t algo, const void *in, void *hash, int size )
          sph_simd512_init( &ctx ); sph_simd512( &ctx, in, size );
          sph_simd512_close( &ctx, hash ); break; }
       case ECHO:
+#if defined(__AES__) || defined(__ARM_FEATURE_AES)
+      {  hashState_echo ctx;
+         echo_full( &ctx, hash, 512, in, size ); break; }
+#else
       {  sph_echo512_context ctx;
          sph_echo512_init( &ctx ); sph_echo512( &ctx, in, size );
          sph_echo512_close( &ctx, hash ); break; }
+#endif
       case HAMSI:
       {  sph_hamsi512_context ctx;
          sph_hamsi512_init( &ctx ); sph_hamsi512( &ctx, in, size );
@@ -244,11 +263,60 @@ bool gr_self_test( void )
    return true;
 }
 
+// GR_CN_LANES nonces at once. The core order and CN triple depend only on the
+// header's prevblock region (bytes [4..36)), which is identical across the
+// lanes' nonces, so both are derived once; the three CN stages run interleaved
+// via cryptonight_4way to hide scratchpad memory latency.
+static void gr_hash_4way( void *const out[GR_CN_LANES],
+                          const void *const in[GR_CN_LANES] )
+{
+   uint8_t h1[GR_CN_LANES][64] __attribute__ ((aligned (64)));
+   uint8_t h2[GR_CN_LANES][64] __attribute__ ((aligned (64)));
+   const void *cin[GR_CN_LANES];
+   void *cout[GR_CN_LANES];
+   uint8_t coreOrder[15], cnOrder[6];
+   int l;
+
+   getAlgoString( (const uint8_t*)in[0] + 4, 64, coreOrder, 15 );
+   getAlgoString( (const uint8_t*)in[0] + 4, 64, cnOrder,    6 );
+
+   for ( l = 0; l < GR_CN_LANES; l++ )
+      { cin[l] = h1[l]; cout[l] = h2[l]; }
+
+   // Group 1 (first core round consumes 80 bytes).
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[0], in[l], h1[l], 80 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[1], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[2], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[3], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[4], h2[l], h1[l], 64 );
+   cryptonight_4way( cnOrder[0], cin, cout, 64 );          // h1 -> h2
+   for ( l = 0; l < GR_CN_LANES; l++ ) memset( h2[l] + 32, 0, 32 );
+
+   // Group 2.
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[5], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[6], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[7], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[8], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[9], h2[l], h1[l], 64 );
+   cryptonight_4way( cnOrder[1], cin, cout, 64 );          // h1 -> h2
+   for ( l = 0; l < GR_CN_LANES; l++ ) memset( h2[l] + 32, 0, 32 );
+
+   // Group 3.
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[10], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[11], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[12], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[13], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[14], h2[l], h1[l], 64 );
+   cryptonight_4way( cnOrder[2], cin, cout, 64 );          // h1 -> h2
+
+   for ( l = 0; l < GR_CN_LANES; l++ ) memcpy( out[l], h2[l], 32 );
+}
+
 int scanhash_gr( struct work *work, uint32_t max_nonce, uint64_t *hashes_done,
                  struct thr_info *mythr )
 {
-   uint32_t _ALIGN(64) edata[20];
-   uint32_t _ALIGN(64) hash[8];
+   uint32_t _ALIGN(64) edata[GR_CN_LANES][20];
+   uint32_t _ALIGN(64) hash[GR_CN_LANES][8];
    uint32_t *pdata = work->data;
    uint32_t *ptarget = work->target;
    const uint32_t first_nonce = pdata[19];
@@ -256,19 +324,38 @@ int scanhash_gr( struct work *work, uint32_t max_nonce, uint64_t *hashes_done,
    uint32_t nonce = first_nonce;
    volatile uint8_t *restart = &( work_restart[thr_id].restart );
    const bool bench = opt_benchmark;
+   const void *in[GR_CN_LANES];
+   void *out[GR_CN_LANES];
 
-   v128_bswap32_80( edata, pdata );
+   v128_bswap32_80( edata[0], pdata );
+   for ( int l = 1; l < GR_CN_LANES; l++ )
+      memcpy( edata[l], edata[0], 80 );
+   for ( int l = 0; l < GR_CN_LANES; l++ )
+      { in[l] = edata[l]; out[l] = hash[l]; }
+
+   static volatile int logged_backing = 0;
 
    do
    {
-      edata[19] = nonce;
-      gr_hash( hash, edata );
-      if ( unlikely( valid_hash( hash, ptarget ) && !bench ) )
+      for ( int l = 0; l < GR_CN_LANES; l++ )
+         edata[l][19] = nonce + l;
+
+      gr_hash_4way( out, in );
+
+      if ( thr_id == 0 && !logged_backing )
       {
-         pdata[19] = bswap_32( nonce );
-         submit_solution( work, hash, mythr );
+         logged_backing = 1;
+         applog( LOG_INFO, "GhostRider: CryptoNight scratchpad backing: %s",
+                 cryptonight_scratchpad_backing() );
       }
-      nonce++;
+
+      for ( int l = 0; l < GR_CN_LANES; l++ )
+         if ( unlikely( valid_hash( hash[l], ptarget ) && !bench ) )
+         {
+            pdata[19] = bswap_32( nonce + l );
+            submit_solution( work, hash[l], mythr );
+         }
+      nonce += GR_CN_LANES;
    } while ( nonce < max_nonce && !(*restart) );
 
    pdata[19] = nonce;
