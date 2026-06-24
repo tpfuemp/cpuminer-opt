@@ -633,7 +633,8 @@ enum algos {
         ALGO_EQUIHASH125,    /* 125/4 — Flux / ZelCash             */
         ALGO_EQUIHASH144,    /* 144/5 — Bitcoin Gold (BTG)         */
         ALGO_EQUIHASH192,    /* 192/7 — ZeroClassic                */
-        ALGO_GROESTL,     
+        ALGO_GHOSTRIDER,
+        ALGO_GROESTL,
         ALGO_HEX,
         ALGO_HMQ1725,
         ALGO_JHA,
@@ -736,6 +737,7 @@ static const char* const algo_names[] = {
         "equihash125",
         "equihash144",
         "equihash192",
+        "ghostrider",
         "groestl",
         "hex",
         "hmq1725",

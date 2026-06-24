@@ -88,6 +88,16 @@ cpuminer_SOURCES = \
   algo/echo/echo-hash-4way.c \
   algo/echo/aes_ni/hash.c\
   algo/gost/sph_gost.c \
+  algo/gr/gr-gate.c \
+  algo/gr/cryptonight.c \
+  algo/gr/cryptonote/crypto/hash.c \
+  algo/gr/cryptonote/crypto/oaes_lib.c \
+  algo/gr/cryptonote/crypto/aesb.c \
+  algo/gr/cryptonote/crypto/c_keccak.c \
+  algo/gr/cryptonote/crypto/c_blake256.c \
+  algo/gr/cryptonote/crypto/c_groestl.c \
+  algo/gr/cryptonote/crypto/c_jh.c \
+  algo/gr/cryptonote/crypto/c_skein.c \
   algo/groestl/groestl-gate.c \
   algo/groestl/groestl512-hash-4way.c \
   algo/groestl/groestl256-hash-4way.c \

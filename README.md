@@ -68,6 +68,7 @@ Supported Algorithms
                           decred
                           deep          Deepcoin (DCN)
                           dmd-gr        Diamond-Groestl
+                          ghostrider    Raptoreum (RTM)
                           groestl       Groestl coin
                           hex           x16r-hex
                           hmq1725       
