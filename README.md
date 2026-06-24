@@ -1,6 +1,14 @@
+# cpuminer-opt
+
+**A high-performance, multi-algorithm CPU miner** for Linux, Windows, MacOS and
+BSD. Optimized for x86-64 (SSE2 / AVX2 / AVX512 / AES-NI / VAES) and aarch64
+(NEON / ARMv8 crypto), with 100+ supported algorithms.
+
+---
+
 cpuminer-opt is a fork of cpuminer-multi by TPruvot with optimizations
-imported from other miners developped by lucas Jones, djm34, Wolf0, pooler,
-Jeff garzik, ig0tik3d, elmad, palmd, and Optiminer, with additional
+imported from other miners developed by Lucas Jones, djm34, Wolf0, pooler,
+Jeff Garzik, ig0tik3d, elmad, palmd, and Optiminer, with additional
 optimizations by Jay D Dee.
 
 All of the code is believed to be open and free. If anyone has a
@@ -13,15 +21,9 @@ miners. The source code is open for anyone to inspect. If you don't trust
 the software, don't use it.
 
 
-New thread:
-
-https://bitcointalk.org/index.php?topic=5226770.msg53865575#msg53865575
-
-Old thread:
-
-https://bitcointalk.org/index.php?topic=1326803.0
-
-mailto://jayddee246@gmail.com
+- New thread: https://bitcointalk.org/index.php?topic=5226770.msg53865575#msg53865575
+- Old thread: https://bitcointalk.org/index.php?topic=1326803.0
+- Email: jayddee246@gmail.com
 
 This note is to confirm that bitcointalk users JayDDee and joblo are the
 same person.
@@ -68,6 +70,11 @@ Supported Algorithms
                           decred
                           deep          Deepcoin (DCN)
                           dmd-gr        Diamond-Groestl
+                          equihash      Equihash 200/9 (Zcash, Horizen, Komodo)
+                          equihash96    Equihash 96/5
+                          equihash125   Equihash 125/4 (Flux, ZelCash)
+                          equihash144   Equihash 144/5 (Bitcoin Gold)
+                          equihash192   Equihash 192/7 (ZeroClassic)
                           ghostrider    Raptoreum (RTM)
                           groestl       Groestl coin
                           hex           x16r-hex
@@ -208,7 +215,13 @@ Donations
 
 cpuminer-opt has no fees of any kind but donations are accepted.
 
+Upstream cpuminer-opt (Jay D Dee):
+
  BTC: 12tdvfF7KmAsihBXQXynT6E6th2c2pByTT
+
+This fork (tpfuemp) — ghostrider, sha256dv, equihash and other additions:
+
+ DOGE: DNQdyeLu9DtRfsZCFvy1GfJTwjWJoSWHLh
 
 Happy mining!
 
