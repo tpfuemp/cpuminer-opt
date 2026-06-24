@@ -184,6 +184,7 @@ cpuminer_SOURCES = \
   algo/sha/sha256q-4way.c \
   algo/sha/sha256q.c \
   algo/sha/sha512256d-4way.c \
+  algo/sha/sha256dv.c \
   algo/sha/sha256dt.c \
   algo/shabal/sph_shabal.c \
   algo/shabal/shabal-hash-4way.c \

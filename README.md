@@ -99,6 +99,7 @@ Supported Algorithms
                           scryptn2      scrypt(1048576, 1, 1)
                           sha256d       Double SHA-256
                           sha256dt
+                          sha256dv      SHA-256D Veil
                           sha256q       Quad SHA-256
                           sha256t       Triple SHA-256
                           sha3d         Double keccak256 (BSHA3)

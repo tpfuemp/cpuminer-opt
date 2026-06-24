@@ -465,6 +465,13 @@ struct work
     * Set by scanhash_equihash before calling submit_solution. */
    unsigned char *equihash_solution;
    uint16_t       equihash_solution_len;
+   // Veil SHA256Dv: pool-supplied stage-1 midstate/merkle and the 64-bit nonce.
+   bool          veil_sha256dv;
+   unsigned char veil_midstate_be[32];
+   unsigned char veil_merkle_be[32];
+   uint32_t      veil_ntime;
+   uint32_t      veil_nonce_hi;
+   uint32_t      veil_nonce_lo;
 } __attribute__ ((aligned (WORK_ALIGNMENT)));
 
 struct stratum_job
@@ -499,6 +506,12 @@ struct stratum_job
    unsigned char denom1000[32];
    unsigned char denom10000[32];
    unsigned char proofoffullnode[32];
+   // Veil SHA256Dv job fields (bespoke notify, see stratum_notify_sha256dv).
+   bool          veil_sha256dv;
+   unsigned char veil_midstate_be[32];
+   unsigned char veil_merkle_be[32];
+   uint32_t      veil_ntime;
+   uint32_t      veil_nonce_hi;
 
 } __attribute__ ((aligned (64)));
 
@@ -649,6 +662,7 @@ enum algos {
         ALGO_SCRYPT,
         ALGO_SHA256D,
         ALGO_SHA256DT,
+        ALGO_SHA256DV,
         ALGO_SHA256Q,
         ALGO_SHA256T,
         ALGO_SHA3D,
@@ -751,6 +765,7 @@ static const char* const algo_names[] = {
         "scrypt",
         "sha256d",
         "sha256dt",
+        "sha256dv",
         "sha256q",
         "sha256t",
         "sha3d",
@@ -923,6 +938,7 @@ Options:\n\
                           scryptn2      scrypt(1048576, 1,1)\n\
                           sha256d       Double SHA-256\n\
                           sha256dt      Modified sha256d (Novo)\n\
+                          sha256dv      SHA-256D Veil\n\
                           sha256q       Quad SHA-256, Pyrite (PYE)\n\
                           sha256t       Triple SHA-256, Onecoin (OC)\n\
                           sha3d         Double Keccak256 (BSHA3)\n\

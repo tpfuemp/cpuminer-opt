@@ -1391,7 +1391,27 @@ void std_be_build_stratum_request( char *req, struct work *work )
    free( xnonce2str );
 }
 
-static const char *json_getwork_req = 
+// Veil SHA256Dv mining.submit: reuses the 5-slot json_submit_req template but
+// carries (nonce_hi, ntime, nonce_lo) in place of (xnonce2, ntime, nonce).
+void veil_sha256dv_build_stratum_request( char *req, struct work *work )
+{
+   uint32_t ntime_enc, nonce_hi_enc, nonce_lo_enc;
+   char ntimestr[9], nonce_hi_str[9], nonce_lo_str[9];
+
+   le32enc( &ntime_enc,    work->veil_ntime );
+   le32enc( &nonce_hi_enc, work->veil_nonce_hi );
+   le32enc( &nonce_lo_enc, work->veil_nonce_lo );
+
+   bin2hex( ntimestr,     (char*)&ntime_enc,    sizeof(uint32_t) );
+   bin2hex( nonce_hi_str, (char*)&nonce_hi_enc, sizeof(uint32_t) );
+   bin2hex( nonce_lo_str, (char*)&nonce_lo_enc, sizeof(uint32_t) );
+
+   snprintf( req, JSON_BUF_LEN, json_submit_req, rpc_user,
+             work->job_id ? work->job_id : "",
+             nonce_hi_str, ntimestr, nonce_lo_str );
+}
+
+static const char *json_getwork_req =
   "{\"method\": \"getwork\", \"params\": [\"%s\"], \"id\":4}\r\n";
 
 bool std_le_submit_getwork_result( CURL *curl, struct work *work )
@@ -1913,7 +1933,32 @@ bool submit_solution( struct work *work, const void *hash,
 // Job went stale during hashing of a valid share.
 //   if ( !opt_quiet && work_restart[ thr->id ].restart )
 //      applog( LOG_INFO, CL_LBL "Share may be stale, submitting anyway..." CL_N );
-   
+
+   // Veil SHA256Dv submits a bespoke mining.submit directly over Stratum
+   // (nonce_hi / ntime / nonce_lo) rather than going through submit_work.
+   if ( work->veil_sha256dv )
+   {
+      work->sharediff = hash_to_diff( hash );
+      update_submit_stats( work, hash );
+
+      char req[JSON_BUF_LEN];
+      veil_sha256dv_build_stratum_request( req, work );
+      if ( !stratum_send_line( &stratum, req ) )
+      {
+         applog( LOG_WARNING, "%d VEIL failed to submit share",
+                 submitted_share_count );
+         return false;
+      }
+
+      if ( !opt_quiet )
+         applog( LOG_INFO,
+                 "%d VEIL Submitted nonce_hi=%08x nonce_lo=%08x Diff %.5g Job %s",
+                 submitted_share_count, work->veil_nonce_hi, work->veil_nonce_lo,
+                 work->sharediff, work->job_id ? work->job_id : "(null)" );
+      return true;
+   }
+
+
    /* Display/stats difficulty in pool scale. opt_target_factor is 1.0 for
     * normal algos (no change) and EQH_DIFF_SCALE for equihash, matching the
     * scaling applied to net_diff and the displayed targetdiff. Without this
@@ -2084,11 +2129,40 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
    
    free( g_work->job_id );
    g_work->job_id = strdup( sctx->job.job_id );
-   g_work->xnonce2_len = sctx->xnonce2_size;
-   g_work->xnonce2 = (uchar*) realloc( g_work->xnonce2, sctx->xnonce2_size );
    g_work->height = sctx->block_height;
    g_work->targetdiff = sctx->job.diff
                            / ( opt_target_factor * opt_diff_factor );
+
+   g_work->veil_sha256dv = sctx->job.veil_sha256dv;
+   if ( g_work->veil_sha256dv )
+   {
+      /* Veil SHA256Dv: the pool supplies the stage-1 midstate and merkle, so
+       * there is no coinbase/extranonce to build. A new job seeds the nonce_hi
+       * base; a re-notify of the same job advances it by opt_n_threads so the
+       * thread ranges stay disjoint.                                          */
+      if ( new_job )
+      {
+         memcpy( g_work->veil_midstate_be, sctx->job.veil_midstate_be, 32 );
+         memcpy( g_work->veil_merkle_be,   sctx->job.veil_merkle_be,   32 );
+         g_work->veil_ntime    = sctx->job.veil_ntime;
+         g_work->veil_nonce_hi = sctx->job.veil_nonce_hi;
+      }
+      else
+         g_work->veil_nonce_hi += (uint32_t)opt_n_threads;
+
+      g_work->xnonce2_len = 0;
+      g_work->data[0] =  (uint32_t)sctx->job.version[0]
+                      | ( (uint32_t)sctx->job.version[1] << 8 )
+                      | ( (uint32_t)sctx->job.version[2] << 16 )
+                      | ( (uint32_t)sctx->job.version[3] << 24 );
+      uint32_t nbits_le = le32dec( sctx->job.nbits );
+      g_work->data[ algo_gate.nbits_index ] = nbits_le;
+      net_diff = nbits_to_diff( nbits_le ) * opt_target_factor;
+   }
+   else
+   {
+   g_work->xnonce2_len = sctx->xnonce2_size;
+   g_work->xnonce2 = (uchar*) realloc( g_work->xnonce2, sctx->xnonce2_size );
    memcpy( g_work->xnonce2, sctx->job.xnonce2, sctx->xnonce2_size );
    algo_gate.build_extraheader( g_work, sctx );
    /* nbits_to_diff uses 0xFFFF as the Bitcoin difficulty-1 base.
@@ -2110,6 +2184,7 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
       nbits_word = bswap_32( nbits_word );
    net_diff = nbits_to_diff( nbits_word ) * opt_target_factor;
    algo_gate.set_work_data_endian( g_work );
+   }
    diff_to_hash( g_work->target, g_work->targetdiff );
 
    g_work_time = time(NULL);
@@ -2117,10 +2192,11 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
    pthread_rwlock_unlock( &g_work_lock );
 
    // Pre increment extranonce2 in case of being called again before receiving
-   // a new job
-   for ( int t = 0;
-         t < sctx->xnonce2_size && !( ++sctx->job.xnonce2[t] );
-         t++ );
+   // a new job (Veil SHA256Dv has no extranonce).
+   if ( !g_work->veil_sha256dv )
+      for ( int t = 0;
+            t < sctx->xnonce2_size && !( ++sctx->job.xnonce2[t] );
+            t++ );
 
    pthread_mutex_unlock( &sctx->work_lock );
 
@@ -2147,11 +2223,18 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
                          net_diff, g_work->job_id );
    else if ( opt_debug )
    {
-      unsigned char *xnonce2str = bebin2hex( g_work->xnonce2,
-                                             g_work->xnonce2_len );
-      applog( LOG_INFO, "Extranonce2 0x%s, Block %d, Job %s",
-                        xnonce2str, sctx->block_height, g_work->job_id );
-      free( xnonce2str );
+      if ( g_work->veil_sha256dv )
+         applog( LOG_INFO, "VEIL SHA256Dv work: Block %d, Job %s, nonce_hi=%08x",
+                 sctx->block_height, g_work->job_id ? g_work->job_id : "(null)",
+                 g_work->veil_nonce_hi );
+      else
+      {
+         unsigned char *xnonce2str = bebin2hex( g_work->xnonce2,
+                                                g_work->xnonce2_len );
+         applog( LOG_INFO, "Extranonce2 0x%s, Block %d, Job %s",
+                           xnonce2str, sctx->block_height, g_work->job_id );
+         free( xnonce2str );
+      }
    }
 
    // Update data and calculate new estimates.

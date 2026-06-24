@@ -2161,6 +2161,104 @@ static bool stratum_notify_equihash(struct stratum_ctx *sctx, json_t *params)
     return true;
 }
 
+/* ── Veil SHA256Dv Stratum notify ─────────────────────────────────────────
+ * Veil's SHA256Dv pool sends a bespoke 11-param mining.notify:
+ *   params[0]  = job_id        (string)
+ *   params[1]  = version       (integer)
+ *   params[2]  = midstate      (64-char hex, 32 bytes, big-endian)
+ *   params[3]  = merkle        (64-char hex, 32 bytes, big-endian)
+ *   params[4]  = (unused here)
+ *   params[5]  = ntime         (integer)
+ *   params[6]  = nbits         (8-char hex, 4 bytes)
+ *   params[7]  = nonce_hi      (integer, base high 32 bits of the 64-bit nonce)
+ *   params[8]  = clean_jobs    (bool)
+ *   params[9]  = block_height  (integer)
+ *   params[10] = tx_count      (integer)
+ * The pool has already done the SHA-256 stage-1; the miner only builds and
+ * hashes the 80-byte stage-2 buffer (see algo/sha/sha256dv.c).
+ * ───────────────────────────────────────────────────────────────────────── */
+static bool stratum_notify_sha256dv(struct stratum_ctx *sctx, json_t *params)
+{
+    if (!json_is_array(params))
+    {
+        applog(LOG_ERR, "SHA256Dv notify: params is not array");
+        return false;
+    }
+
+    int jsize = json_array_size(params);
+    if (jsize < 11)
+    {
+        applog(LOG_ERR, "SHA256Dv notify: expected 11 params, got %d", jsize);
+        return false;
+    }
+
+    json_t *j_job_id = json_array_get(params, 0);
+    json_t *j_ver    = json_array_get(params, 1);
+    json_t *j_mid    = json_array_get(params, 2);
+    json_t *j_mrk    = json_array_get(params, 3);
+    json_t *j_ntime  = json_array_get(params, 5);
+    json_t *j_nbits  = json_array_get(params, 6);
+    json_t *j_nonhi  = json_array_get(params, 7);
+    json_t *j_clean  = json_array_get(params, 8);
+    json_t *j_height = json_array_get(params, 9);
+    json_t *j_txcnt  = json_array_get(params, 10);
+
+    if (!json_is_string(j_job_id) || !json_is_integer(j_ver) ||
+        !json_is_string(j_mid)    || !json_is_string(j_mrk)  ||
+        !json_is_integer(j_ntime) || !json_is_string(j_nbits) ||
+        !json_is_integer(j_nonhi) || !json_is_boolean(j_clean) ||
+        !json_is_integer(j_height) || !json_is_integer(j_txcnt))
+    {
+        applog(LOG_ERR, "SHA256Dv notify: invalid parameters");
+        return false;
+    }
+
+    const char *job_id       = json_string_value(j_job_id);
+    const char *midstate_hex = json_string_value(j_mid);
+    const char *merkle_hex   = json_string_value(j_mrk);
+    const char *nbits_hex    = json_string_value(j_nbits);
+    uint32_t version  = (uint32_t)json_integer_value(j_ver);
+    uint32_t ntime    = (uint32_t)json_integer_value(j_ntime);
+    uint32_t nonce_hi = (uint32_t)json_integer_value(j_nonhi);
+    int      height   = (int)json_integer_value(j_height);
+    int      tx_count = (int)json_integer_value(j_txcnt);
+    bool     clean    = json_is_true(j_clean);
+
+    if (strlen(midstate_hex) != 64 || strlen(merkle_hex) != 64 ||
+        strlen(nbits_hex) != 8)
+    {
+        applog(LOG_ERR, "SHA256Dv notify: bad field length");
+        return false;
+    }
+
+    pthread_mutex_lock(&sctx->work_lock);
+
+    free(sctx->job.job_id);
+    sctx->job.job_id = strdup(job_id);
+
+    sctx->job.version[0] =  version        & 0xff;
+    sctx->job.version[1] = (version >> 8)  & 0xff;
+    sctx->job.version[2] = (version >> 16) & 0xff;
+    sctx->job.version[3] = (version >> 24) & 0xff;
+
+    hex2bin(sctx->job.veil_midstate_be, midstate_hex, 32);
+    hex2bin(sctx->job.veil_merkle_be,   merkle_hex,   32);
+    hex2bin(sctx->job.nbits,            nbits_hex,    4);
+
+    sctx->job.veil_ntime    = ntime;
+    sctx->job.veil_nonce_hi = nonce_hi;
+    sctx->job.veil_sha256dv = true;
+    sctx->job.clean         = clean;
+    sctx->job.diff          = sctx->next_diff;
+
+    sctx->block_height = height;
+    sctx->work.tx_count = tx_count;
+
+    pthread_mutex_unlock(&sctx->work_lock);
+    sctx->new_job = true;
+    return true;
+}
+
 static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 {
     /* All Equihash variants share the same notify format — dispatch to handler */
@@ -2168,6 +2266,10 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
         opt_algo == ALGO_EQUIHASH125 || opt_algo == ALGO_EQUIHASH144 ||
         opt_algo == ALGO_EQUIHASH192)
         return stratum_notify_equihash(sctx, params);
+
+    /* Veil SHA256Dv has a bespoke notify format — dispatch to handler */
+    if (opt_algo == ALGO_SHA256DV)
+        return stratum_notify_sha256dv(sctx, params);
 
 	const char *job_id, *prevhash, *coinb1, *coinb2, *version, *nbits, *stime;
    const char *finalsaplinghash = NULL;
