@@ -2802,6 +2802,12 @@ bool stratum_handle_method(struct stratum_ctx *sctx, const char *s)
 
 	if (!strcasecmp(method, "mining.notify")) {
 		ret = stratum_notify(sctx, params);
+      // Odocrypt pools send the epoch key as a top-level "odokey" field
+      // alongside the standard notify params.
+      pthread_mutex_lock(&sctx->work_lock);
+      sctx->job.odokey =
+         (uint32_t)json_integer_value(json_object_get(val, "odokey"));
+      pthread_mutex_unlock(&sctx->work_lock);
       sctx->new_job = true;
       goto out;
 	}

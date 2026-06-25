@@ -153,6 +153,8 @@ cpuminer_SOURCES = \
   algo/nist5/nist5-4way.c \
   algo/nist5/nist5.c \
   algo/nist5/zr5.c \
+  algo/odo/odocrypt.c \
+  algo/odo/odo-gate.c \
   algo/panama/panama-hash-4way.c \
   algo/panama/sph_panama.c \
   algo/quark/quark-gate.c \

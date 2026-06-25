@@ -472,6 +472,9 @@ struct work
    uint32_t      veil_ntime;
    uint32_t      veil_nonce_hi;
    uint32_t      veil_nonce_lo;
+   // Odocrypt: pool-supplied epoch key ("odokey" notify field). 0 = derive
+   // from nTime (nTime - nTime % shapechange).
+   uint32_t      odokey;
 } __attribute__ ((aligned (WORK_ALIGNMENT)));
 
 struct stratum_job
@@ -512,6 +515,8 @@ struct stratum_job
    unsigned char veil_merkle_be[32];
    uint32_t      veil_ntime;
    uint32_t      veil_nonce_hi;
+   // Odocrypt epoch key from the "odokey" notify field (0 if absent).
+   uint32_t      odokey;
 
 } __attribute__ ((aligned (64)));
 
@@ -652,8 +657,9 @@ enum algos {
         ALGO_MINOTAURX,
         ALGO_MYR_GR,      
         ALGO_NEOSCRYPT,
-        ALGO_NIST5,       
-        ALGO_PENTABLAKE,  
+        ALGO_NIST5,
+        ALGO_ODO,
+        ALGO_PENTABLAKE,
         ALGO_PHI1612,
         ALGO_PHI2,
         ALGO_POLYTIMOS,
@@ -757,6 +763,7 @@ static const char* const algo_names[] = {
         "myr-gr",
         "neoscrypt",
         "nist5",
+        "odo",
         "pentablake",
         "phi1612",
         "phi2",

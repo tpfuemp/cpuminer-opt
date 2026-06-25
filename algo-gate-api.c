@@ -336,6 +336,7 @@ bool register_algo_gate( int algo, algo_gate_t *gate )
     case ALGO_MYR_GR:       rc = register_myriad_algo        ( gate ); break;
     case ALGO_NEOSCRYPT:    rc = register_neoscrypt_algo     ( gate ); break;
     case ALGO_NIST5:        rc = register_nist5_algo         ( gate ); break;
+    case ALGO_ODO:          rc = register_odo_algo           ( gate ); break;
     case ALGO_PENTABLAKE:   rc = register_pentablake_algo    ( gate ); break;
     case ALGO_PHI1612:      rc = register_phi1612_algo       ( gate ); break;
     case ALGO_PHI2:         rc = register_phi2_algo          ( gate ); break;
@@ -456,6 +457,7 @@ const char* const algo_alias_map[][2] =
   { "horizen",           "equihash"       },   /* Horizen (ZEN) = 200/9  */
   { "komodo",            "equihash"       },   /* Komodo = 200/9          */
   { "zcash",             "equihash"       },   /* ZCash = 200/9           */
+  { "odocrypt",          "odo"            },
   { "zec",               "equihash"       },
   { "zen",               "equihash"       },
   { "timetravel8",       "timetravel"     },

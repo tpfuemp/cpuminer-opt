@@ -95,6 +95,7 @@ Supported Algorithms
                           myr-gr        Myriad-Groestl
                           neoscrypt     NeoScrypt(128, 2, 1)
                           nist5         Nist5
+                          odo           DigiByte (DGB)
                           pentablake    Pentablake
                           phi1612       phi
                           phi2          

@@ -229,6 +229,19 @@ uint64_t net_blocks = 0;
 uint32_t opt_work_size = 0;
 bool     opt_bell = false;
 
+// Format a difficulty as a human-readable string with a k/M/G/T/P suffix
+// instead of exponential notation (e.g. 170100 -> "170.10k", 2.26e6 -> "2.26M").
+static const char *format_diff( char *buf, size_t bufsz, double d )
+{
+   if ( d < 1e3 )       snprintf( buf, bufsz, "%.4g",  d );
+   else if ( d < 1e6 )  snprintf( buf, bufsz, "%.2fk", d / 1e3  );
+   else if ( d < 1e9 )  snprintf( buf, bufsz, "%.2fM", d / 1e6  );
+   else if ( d < 1e12 ) snprintf( buf, bufsz, "%.2fG", d / 1e9  );
+   else if ( d < 1e15 ) snprintf( buf, bufsz, "%.2fT", d / 1e12 );
+   else                 snprintf( buf, bufsz, "%.2fP", d / 1e15 );
+   return buf;
+}
+
 // conditional mining
 bool *conditional_state = NULL;
 //bool conditional_state[MAX_CPUS] = { 0 };
@@ -1672,14 +1685,20 @@ start:
          last_block_height = work->height;
          last_targetdiff = net_diff;
 
-         applog( LOG_BLUE, "New Block %d, Tx %d, Net Diff %.5g, Ntime %08x",
-                             work->height, work->tx_count, net_diff,
+         char db[24];
+         applog( LOG_BLUE, "New Block %d, Tx %d, Net Diff %s, Ntime %08x",
+                             work->height, work->tx_count,
+                             format_diff( db, sizeof db, net_diff ),
                              bswap_32( work->data[ algo_gate.ntime_index ] ) );
       }
       else if ( memcmp( work->data, g_work.data, algo_gate.work_cmp_size ) )
-         applog( LOG_BLUE, "New Work: Block %d, Tx %d, Net Diff %.5g, Ntime %08x",
-                             work->height, work->tx_count, net_diff,
+      {
+         char db[24];
+         applog( LOG_BLUE, "New Work: Block %d, Tx %d, Net Diff %s, Ntime %08x",
+                             work->height, work->tx_count,
+                             format_diff( db, sizeof db, net_diff ),
                              bswap_32( work->data[ algo_gate.ntime_index ] ) );
+      }
       else
         new_work = false;
 
@@ -2133,6 +2152,8 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
    g_work->targetdiff = sctx->job.diff
                            / ( opt_target_factor * opt_diff_factor );
 
+   g_work->odokey = sctx->job.odokey;   // Odocrypt epoch key (0 if not sent)
+
    g_work->veil_sha256dv = sctx->job.veil_sha256dv;
    if ( g_work->veil_sha256dv )
    {
@@ -2209,18 +2230,20 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
 
    pthread_mutex_unlock( &stats_lock );
 
+   char db[24];
    if ( stratum_diff != sctx->job.diff )
-      applog( LOG_BLUE, "New Stratum Diff %g, Block %d, Tx %d, Job %s",
-                        sctx->job.diff, sctx->block_height,
+      applog( LOG_BLUE, "New Stratum Diff %s, Block %d, Tx %d, Job %s",
+                        format_diff( db, sizeof db, sctx->job.diff ),
+                        sctx->block_height,
                         sctx->job.merkle_count, g_work->job_id );
    else if ( last_block_height != sctx->block_height )
-      applog( LOG_BLUE, "New Block %d, Tx %d, Netdiff %.5g, Job %s",
+      applog( LOG_BLUE, "New Block %d, Tx %d, Netdiff %s, Job %s",
                         sctx->block_height, sctx->job.merkle_count,
-                        net_diff, g_work->job_id );
+                        format_diff( db, sizeof db, net_diff ), g_work->job_id );
    else if ( g_work->job_id && new_job )
-      applog( LOG_BLUE, "New Work: Block %d, Tx %d, Netdiff %.5g, Job %s",
+      applog( LOG_BLUE, "New Work: Block %d, Tx %d, Netdiff %s, Job %s",
                          sctx->block_height, sctx->job.merkle_count,
-                         net_diff, g_work->job_id );
+                         format_diff( db, sizeof db, net_diff ), g_work->job_id );
    else if ( opt_debug )
    {
       if ( g_work->veil_sha256dv )
@@ -2255,9 +2278,12 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
        /* targetdiff is stored in internal scale (for diff_to_hash).
         * Multiply by opt_target_factor to display in pool scale.
         * net_diff is already scaled above. stratum_diff is pool scale. */
-       applog2( LOG_INFO, "Diff: Net %.5g, Stratum %.5g, Target %.5g",
-                          net_diff, stratum_diff,
-                          g_work->targetdiff * opt_target_factor );
+       char dn[24], ds[24], dt[24];
+       applog2( LOG_INFO, "Diff: Net %s, Stratum %s, Target %s",
+                          format_diff( dn, sizeof dn, net_diff ),
+                          format_diff( ds, sizeof ds, stratum_diff ),
+                          format_diff( dt, sizeof dt,
+                                       g_work->targetdiff * opt_target_factor ) );
 
        if ( likely( hr > 0. ) )
        {
