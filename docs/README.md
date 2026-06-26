@@ -92,6 +92,7 @@ Per-algorithm documentation lives in [`algorithms/`](algorithms/):
 - [Argon2d family](algorithms/argon2d.md) — Credits, Dynamic, Unitus
 - [Lyra2 family](algorithms/lyra2.md) — Vertcoin, Monacoin, Zcoin/Firo, Garlicoin
 - [X-chains (x11–x17 and relatives)](algorithms/x-chains.md) — Dash and many others
+- [SkyDoge](algorithms/skydoge.md) — SkyDoge
 - [Simple & legacy hashes](algorithms/simple-hashes.md) — sha256d, blake, keccak, groestl, skein, quark and more
 
 ---

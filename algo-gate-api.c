@@ -356,6 +356,7 @@ bool register_algo_gate( int algo, algo_gate_t *gate )
     case ALGO_SKEIN:        rc = register_skein_algo         ( gate ); break;
     case ALGO_SKEIN2:       rc = register_skein2_algo        ( gate ); break;
     case ALGO_SKUNK:        rc = register_skunk_algo         ( gate ); break;
+    case ALGO_SKYDOGE:      rc = register_skydoge_algo       ( gate ); break;
     case ALGO_SONOA:        rc = register_sonoa_algo         ( gate ); break;
     case ALGO_TIMETRAVEL:   rc = register_timetravel_algo    ( gate ); break;
     case ALGO_TIMETRAVEL10: rc = register_timetravel10_algo  ( gate ); break;

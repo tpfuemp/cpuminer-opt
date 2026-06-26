@@ -116,6 +116,7 @@ Supported Algorithms
                           skein         Skein+Sha (Skeincoin)
                           skein2        Double Skein (Woodcoin)
                           skunk         Signatum (SIGT)
+                          skydoge       SkyDoge
                           sonoa         Sono
                           timetravel    Machinecoin (MAC)
                           timetravel10  Bitcore
