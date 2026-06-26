@@ -316,6 +316,7 @@ bool register_algo_gate( int algo, algo_gate_t *gate )
     case ALGO_EQUIHASH125:  rc = register_equihash125_algo   ( gate ); break;
     case ALGO_EQUIHASH144:  rc = register_equihash144_algo   ( gate ); break;
     case ALGO_EQUIHASH192:  rc = register_equihash192_algo   ( gate ); break;
+    case ALGO_FLEX:         rc = register_flex_algo          ( gate ); break;
     case ALGO_GHOSTRIDER:   rc = register_gr_algo            ( gate ); break;
     case ALGO_GROESTL:      rc = register_groestl_algo       ( gate ); break;
     case ALGO_HEX:          rc = register_hex_algo           ( gate ); break;

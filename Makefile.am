@@ -88,6 +88,13 @@ cpuminer_SOURCES = \
   algo/echo/echo-hash-4way.c \
   algo/echo/aes_ni/hash.c\
   algo/gost/sph_gost.c \
+  algo/flex/flex-gate.c \
+  algo/flex/cryptonote/cryptonight_dark.c \
+  algo/flex/cryptonote/cryptonight_dark_lite.c \
+  algo/flex/cryptonote/cryptonight_fast.c \
+  algo/flex/cryptonote/cryptonight_lite.c \
+  algo/flex/cryptonote/cryptonight_turtle.c \
+  algo/flex/cryptonote/cryptonight_turtle_lite.c \
   algo/gr/gr-gate.c \
   algo/gr/cryptonight.c \
   algo/gr/cryptonote/crypto/hash.c \
