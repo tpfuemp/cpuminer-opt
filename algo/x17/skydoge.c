@@ -1,4 +1,4 @@
-#include "algo-gate-api.h"
+#include "skydoge-gate.h"
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -179,7 +179,7 @@ int skydoge_hash( void *output, const void *input, int thr_id )
 // is the resulting 32-byte digest (little-endian words: hash[0]=0x0e05d672 ..
 // hash[7]=0x0000001a), which the pool accepted, so it is consensus-correct. This
 // also guards the Phase-2 optimized cores against any divergence from sph.
-static const uint8_t skydoge_test_input[80] =
+const uint8_t skydoge_test_input[80] =
 {
    0x00,0x00,0x00,0x20, 0x2e,0x4c,0xf8,0x2c, 0x5a,0xc6,0x4f,0xf3, 0xc0,0xcc,0x0d,0x6d,
    0x8c,0x0d,0x0e,0xb5, 0x45,0x32,0x1b,0x2c, 0x85,0x9f,0x8a,0x78, 0xa4,0xd3,0x0e,0x01,
@@ -188,7 +188,7 @@ static const uint8_t skydoge_test_input[80] =
    0x3f,0xdf,0x1f,0xfd, 0x5c,0xdf,0x3e,0x6a, 0x3d,0x20,0x02,0x1c, 0xf0,0x02,0x51,0xaf
 };
 
-static const uint8_t skydoge_test_expected[32] =
+const uint8_t skydoge_test_expected[32] =
 {
    0x72,0xd6,0x05,0x0e, 0x7d,0xfa,0x96,0x04, 0x80,0x1a,0x9d,0x73, 0xbc,0xd5,0x44,0xe0,
    0x7b,0xed,0xd5,0xd2, 0xc1,0x49,0xb4,0xd1, 0xf1,0x33,0xff,0xbc, 0x1a,0x00,0x00,0x00
@@ -216,6 +216,8 @@ bool skydoge_self_test( void )
    applog( LOG_ERR, "  expected: %s", exp );
    return false;
 }
+
+#if !defined(SKYDOGE_4WAY)
 
 int scanhash_skydoge( struct work *work, uint32_t max_nonce,
                       uint64_t *hashes_done, struct thr_info *mythr )
@@ -251,8 +253,19 @@ int scanhash_skydoge( struct work *work, uint32_t max_nonce,
    return 0;
 }
 
+#endif // !SKYDOGE_4WAY
+
 bool register_skydoge_algo( algo_gate_t *gate )
 {
+#if defined(SKYDOGE_4WAY)
+   if ( !skydoge_4way_self_test() )
+   {
+      applog( LOG_ERR, "SkyDoge 4-way self-test failed" );
+      return false;
+   }
+   gate->scanhash      = (void*)&scanhash_skydoge_4x64;
+   gate->hash          = (void*)&skydoge_4x64_hash;
+#else
    if ( !skydoge_self_test() )
    {
       applog( LOG_ERR, "SkyDoge self-test failed" );
@@ -260,6 +273,7 @@ bool register_skydoge_algo( algo_gate_t *gate )
    }
    gate->scanhash      = (void*)&scanhash_skydoge;
    gate->hash          = (void*)&skydoge_hash;
+#endif
    gate->optimizations = SSE2_OPT | AES_OPT | AVX2_OPT | NEON_OPT;
    // Standard Bitcoin difficulty scale (0xffff base), like the other plain
    // 256-bit-output hash algos. (A 256.0 factor made targetdiff 256x too easy

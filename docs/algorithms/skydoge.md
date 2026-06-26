@@ -41,15 +41,18 @@ Notes:
 
 ## Performance
 
-Because the chain is fixed and nonce-independent, SkyDoge is compute-bound and benefits
-directly from the project's optimized single-hash cores:
+Because the chain is fixed and nonce-independent, SkyDoge is compute-bound and
+parallelizes cleanly:
 
-- **Hardware AES** (AES-NI / ARMv8 crypto) for the AES-based rounds — Groestl, Echo,
-  Fugue.
-- **SSE2 / vector** implementations for Luffa, CubeHash and SIMD, plus the optimized
-  Blake-512 core.
-- Every optimized core is bit-identical to the scalar reference (verified by the
-  startup KAT below).
+- **Parallel-lane hashing (4-way).** On AVX2/AVX-512 the miner hashes 4 nonces at once:
+  blake, skein, bmw, jh, keccak, hamsi and sha512 run 4-way (4×64); luffa and the
+  simd/echo/cubehash/shavite group run 2-way (2×128, using VAES for the AES rounds
+  where available); the remaining stages run per-lane. CPUs without AVX2 use a scalar
+  path.
+- **Hardware AES** (AES-NI / VAES / ARMv8 crypto) for the AES-based rounds — Groestl,
+  Echo, Fugue.
+- Every implementation (each SIMD width and the scalar reference) is bit-identical, so
+  the startup KAT below guards all of them.
 
 ## Verification
 
@@ -59,7 +62,6 @@ invalid shares. End-to-end correctness is confirmed by pool-accepted shares.
 
 ## Possible optimizations (preview)
 
-- **Parallel-lane hashing** — batch several nonces per pass with 4/8/16-way (AVX2 /
-  AVX-512) implementations, as the X-chains do. The fixed, nonce-independent order
-  makes this the largest remaining throughput gain.
-- **Wider AES** — VAES for the AES-based rounds on supporting CPUs.
+- **Wider batching (8-way)** — an 8×64 path for AVX-512 to hash 8 nonces per pass.
+- **More n-way stages** — promote the currently per-lane stages (fugue, shabal,
+  whirlpool, sha256, haval) to n-way implementations where available.
