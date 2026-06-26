@@ -217,7 +217,7 @@ bool skydoge_self_test( void )
    return false;
 }
 
-#if !defined(SKYDOGE_4WAY)
+#if !defined(SKYDOGE_8WAY) && !defined(SKYDOGE_4WAY)
 
 int scanhash_skydoge( struct work *work, uint32_t max_nonce,
                       uint64_t *hashes_done, struct thr_info *mythr )
@@ -253,11 +253,19 @@ int scanhash_skydoge( struct work *work, uint32_t max_nonce,
    return 0;
 }
 
-#endif // !SKYDOGE_4WAY
+#endif // scalar
 
 bool register_skydoge_algo( algo_gate_t *gate )
 {
-#if defined(SKYDOGE_4WAY)
+#if defined(SKYDOGE_8WAY)
+   if ( !skydoge_8way_self_test() )
+   {
+      applog( LOG_ERR, "SkyDoge 8-way self-test failed" );
+      return false;
+   }
+   gate->scanhash      = (void*)&scanhash_skydoge_8x64;
+   gate->hash          = (void*)&skydoge_8x64_hash;
+#elif defined(SKYDOGE_4WAY)
    if ( !skydoge_4way_self_test() )
    {
       applog( LOG_ERR, "SkyDoge 4-way self-test failed" );

@@ -4,10 +4,11 @@
 #include "algo-gate-api.h"
 #include <stdint.h>
 
-// SkyDoge width dispatch. Phase 2b starts with the 4x64 path, enabled on AVX2
-// and above (so AVX-512 also exercises it for now); wider 8x64/16-way paths can
-// be added later. SSE2/NEON and non-AVX2 builds use the scalar path.
-#if defined(__AVX2__)
+// SkyDoge width dispatch: AVX-512 -> 8x64 (8 nonces), AVX2 -> 4x64 (4 nonces),
+// otherwise the scalar path.
+#if defined(SIMD512)
+  #define SKYDOGE_8WAY 1
+#elif defined(__AVX2__)
   #define SKYDOGE_4WAY 1
 #endif
 
@@ -23,7 +24,12 @@ bool skydoge_self_test( void );
 extern const uint8_t skydoge_test_input[80];
 extern const uint8_t skydoge_test_expected[32];
 
-#if defined(SKYDOGE_4WAY)
+#if defined(SKYDOGE_8WAY)
+int  skydoge_8x64_hash( void *output, const void *input, int thr_id );
+int  scanhash_skydoge_8x64( struct work *work, uint32_t max_nonce,
+                            uint64_t *hashes_done, struct thr_info *mythr );
+bool skydoge_8way_self_test( void );
+#elif defined(SKYDOGE_4WAY)
 int  skydoge_4x64_hash( void *output, const void *input, int thr_id );
 int  scanhash_skydoge_4x64( struct work *work, uint32_t max_nonce,
                             uint64_t *hashes_done, struct thr_info *mythr );

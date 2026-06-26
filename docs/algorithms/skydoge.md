@@ -44,11 +44,13 @@ Notes:
 Because the chain is fixed and nonce-independent, SkyDoge is compute-bound and
 parallelizes cleanly:
 
-- **Parallel-lane hashing (4-way).** On AVX2/AVX-512 the miner hashes 4 nonces at once:
-  blake, skein, bmw, jh, keccak, hamsi and sha512 run 4-way (4×64); luffa and the
-  simd/echo/cubehash/shavite group run 2-way (2×128, using VAES for the AES rounds
-  where available); the remaining stages run per-lane. CPUs without AVX2 use a scalar
-  path.
+- **Parallel-lane hashing.** AVX-512 hashes 8 nonces at once (8×64; the heavy hashes
+  run 4×128), AVX2 hashes 4 (4×64; heavies 2×128); blake, skein, bmw, jh, keccak,
+  hamsi and sha512 run at the full 64-bit lane width, luffa and the
+  simd/echo/cubehash/shavite group run at half width (using VAES for the AES rounds
+  where available), and shabal/sha256/haval run at the 32-bit lane width (8-way on
+  AVX-512, 4-way on AVX2). Only fugue and whirlpool run per-lane — they have no n-way
+  implementation. CPUs without AVX2 use a scalar path.
 - **Hardware AES** (AES-NI / VAES / ARMv8 crypto) for the AES-based rounds — Groestl,
   Echo, Fugue.
 - Every implementation (each SIMD width and the scalar reference) is bit-identical, so
@@ -62,6 +64,7 @@ invalid shares. End-to-end correctness is confirmed by pool-accepted shares.
 
 ## Possible optimizations (preview)
 
-- **Wider batching (8-way)** — an 8×64 path for AVX-512 to hash 8 nonces per pass.
-- **More n-way stages** — promote the currently per-lane stages (fugue, shabal,
-  whirlpool, sha256, haval) to n-way implementations where available.
+- fugue and whirlpool are the only remaining per-lane stages on all paths; they have
+  no n-way implementation in the codebase, so they bound further gains. Adding n-way
+  fugue/whirlpool (or a 16-way path) is the only remaining lever, with diminishing
+  returns.

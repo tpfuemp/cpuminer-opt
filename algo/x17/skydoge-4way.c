@@ -15,6 +15,9 @@
 #include "algo/keccak/keccak-hash-4way.h"
 #include "algo/hamsi/hamsi-hash-4way.h"
 #include "algo/sha/sha512-hash.h"
+#include "algo/shabal/shabal-hash-4way.h"  // shabal512_4x32
+#include "algo/sha/sha256-hash.h"          // sha256_4x32
+#include "algo/haval/haval-hash-4way.h"    // haval256_4x32
 
 // 2x128 cores for luffa/cubehash/shavite/simd (and, under VAES, groestl/echo)
 #include "algo/luffa/luffa-hash-2way.h"
@@ -60,6 +63,9 @@ union skydoge_4x64_ctx
    keccak512_4x64_context  keccak;
    hamsi512_4x64_context   hamsi;
    sha512_4x64_context     sha512;
+   shabal512_4x32_context  shabal4;
+   sha256_4x32_context     sha256_4;
+   haval256_4x32_context   haval4;
    luffa_2way_context      luffa2;
    cube_2way_context       cube2;
    shavite512_2way_context shavite2;
@@ -206,14 +212,18 @@ int skydoge_4x64_hash( void *output, const void *input, int thr_id )
    hamsi512_4x64_update( &ctx.hamsi, vhash, 64 );
    hamsi512_4x64_close( &ctx.hamsi, vhash );
 
-   // 13-15: fugue, shabal, whirlpool (scalar)
+   // 13: fugue (scalar)
    dintrlv_4x64_512( h0, h1, h2, h3, vhash );
+   for ( int l = 0; l < 4; l++ ) lane_fugue( &sx, lane[l] );
+   // 14: shabal (4x32)
+   intrlv_4x32_512( vhash, h0, h1, h2, h3 );
+   shabal512_4x32_init( &ctx.shabal4 );
+   shabal512_4x32_update( &ctx.shabal4, vhash, 64 );
+   shabal512_4x32_close( &ctx.shabal4, vhash );
+   dintrlv_4x32_512( h0, h1, h2, h3, vhash );
+   // 15: whirlpool (scalar)
    for ( int l = 0; l < 4; l++ )
    {
-      lane_fugue( &sx, lane[l] );
-      sph_shabal512_init( &sx.shabal );
-      sph_shabal512( &sx.shabal, lane[l], 64 );
-      sph_shabal512_close( &sx.shabal, lane[l] );
       sph_whirlpool_init( &sx.whirlpool );
       sph_whirlpool( &sx.whirlpool, lane[l], 64 );
       sph_whirlpool_close( &sx.whirlpool, lane[l] );
@@ -232,22 +242,24 @@ int skydoge_4x64_hash( void *output, const void *input, int thr_id )
    dintrlv_2x128_512( h0, h1, vhashA );
    dintrlv_2x128_512( h2, h3, vhashB );
 
-   // 18-20: whirlpool, sha256, haval (scalar) + finalization
+   // 18: whirlpool (scalar)
    for ( int l = 0; l < 4; l++ )
    {
-      uint8_t hA[64] __attribute__ ((aligned (64)));
       sph_whirlpool_init( &sx.whirlpool );
       sph_whirlpool( &sx.whirlpool, lane[l], 64 );
       sph_whirlpool_close( &sx.whirlpool, lane[l] );
-      sph_sha256_init( &sx.sha256 );
-      sph_sha256( &sx.sha256, lane[l], 64 );
-      sph_sha256_close( &sx.sha256, hA );
-      memset( hA + 32, 0, 32 );
-      sph_haval256_5_init( &sx.haval );
-      sph_haval256_5( &sx.haval, hA, 64 );
-      sph_haval256_5_close( &sx.haval, lane[l] );
-      memcpy( (uint8_t*)output + l * 32, lane[l], 32 );
    }
+   // 19: sha256 (4x32) -> 32 bytes/lane; zero the high 32; 20: haval (4x32)
+   intrlv_4x32_512( vhash, h0, h1, h2, h3 );
+   sha256_4x32_init( &ctx.sha256_4 );
+   sha256_4x32_update( &ctx.sha256_4, vhash, 64 );
+   sha256_4x32_close( &ctx.sha256_4, vhashA );
+   memset( (uint32_t*)vhashA + 32, 0, 32 * sizeof(uint32_t) ); // words 8..15, all 4 lanes
+   haval256_4x32_init( &ctx.haval4 );
+   haval256_4x32_update( &ctx.haval4, vhashA, 64 );
+   haval256_4x32_close( &ctx.haval4, vhash );
+   dintrlv_4x32( (uint8_t*)output,      (uint8_t*)output + 32,
+                 (uint8_t*)output + 64, (uint8_t*)output + 96, vhash, 256 );
    return 1;
 }
 
@@ -299,45 +311,62 @@ int scanhash_skydoge_4x64( struct work *work, uint32_t max_nonce,
    return 0;
 }
 
-// 4-way consensus KAT: reconstruct the raw work data from the (big-endian) KAT
-// header, run it through the exact scanhash interleave, and verify lane 0 of the
-// 4-way hash equals the pool-accepted digest.
+// Self-test = consensus anchor + differential conformance.
+//   1. scalar(KAT) == pool-accepted digest  -> scalar path == consensus.
+//   2. 4-way == scalar for many varied inputs across all lanes -> the 4-way path
+//      is byte-identical to the reference (not just for the single KAT input).
+// Hard-fails on any mismatch, so a non-conformant build refuses to mine.
 bool skydoge_4way_self_test( void )
 {
-   uint32_t pdata[20];
-   uint32_t vdata[20*4] __attribute__ ((aligned (64)));
-   uint32_t hash[8*4]   __attribute__ ((aligned (64)));
-   v128_t   edata[5]    __attribute__ ((aligned (32)));
+   uint8_t ref[32];
 
-   for ( int i = 0; i < 20; i++ )
-      pdata[i] = bswap_32( ((const uint32_t*)skydoge_test_input)[i] );
-
-   edata[0] = v128_swap64_32( casti_v128u32( pdata, 0 ) );
-   edata[1] = v128_swap64_32( casti_v128u32( pdata, 1 ) );
-   edata[2] = v128_swap64_32( casti_v128u32( pdata, 2 ) );
-   edata[3] = v128_swap64_32( casti_v128u32( pdata, 3 ) );
-   edata[4] = v128_swap64_32( casti_v128u32( pdata, 4 ) );
-   mm256_intrlv80_4x64( vdata, edata );
-   blake512_4x64_prehash_le( &skydoge_blake_ctx, skydoge_4way_midstate, vdata );
-
-   skydoge_4x64_hash( hash, vdata, 0 );
-
-   if ( memcmp( hash, skydoge_test_expected, 32 ) == 0 )   // lane 0
+   // 1. Anchor the scalar reference to consensus.
+   skydoge_hash( ref, skydoge_test_input, 0 );
+   if ( memcmp( ref, skydoge_test_expected, 32 ) != 0 )
    {
-      applog( LOG_NOTICE, "SkyDoge 4-way self-test PASSED (consensus KAT)" );
-      return true;
+      applog( LOG_ERR, "SkyDoge scalar reference KAT mismatch - cannot anchor" );
+      return false;
    }
 
-   char got[65], exp[65];
-   for ( int i = 0; i < 32; i++ )
+   // 2. Differential: 4-way vs scalar over KITERS varied headers x 4 lane nonces.
+   const int KITERS = 64;
+   uint32_t lcg = 0x9e3779b9u;
+   for ( int it = 0; it < KITERS; it++ )
    {
-      sprintf( got + i * 2, "%02x", ((uint8_t*)hash)[i] );
-      sprintf( exp + i * 2, "%02x", skydoge_test_expected[i] );
+      uint32_t pdata[20];
+      for ( int i = 0; i < 20; i++ )
+      {  lcg = lcg * 1664525u + 1013904223u;  pdata[i] = lcg;  }
+
+      v128_t   edata[5]    __attribute__ ((aligned (32)));
+      uint32_t vdata[20*4] __attribute__ ((aligned (64)));
+      uint32_t vhash[8*4]  __attribute__ ((aligned (64)));
+      for ( int k = 0; k < 5; k++ )
+         edata[k] = v128_swap64_32( casti_v128u32( pdata, k ) );
+      mm256_intrlv80_4x64( vdata, edata );
+      __m256i *noncev = (__m256i*)vdata + 9;
+      *noncev = _mm256_add_epi32( *noncev, _mm256_set_epi32( 0,3, 0,2, 0,1, 0,0 ) );
+      blake512_4x64_prehash_le( &skydoge_blake_ctx, skydoge_4way_midstate, vdata );
+      skydoge_4x64_hash( vhash, vdata, 0 );
+
+      for ( int lane = 0; lane < 4; lane++ )
+      {
+         uint32_t eds[20];
+         for ( int i = 0; i < 19; i++ ) be32enc( &eds[i], pdata[i] );
+         be32enc( &eds[19], pdata[19] + lane );
+         skydoge_hash( ref, eds, 0 );
+         if ( memcmp( ref, (uint8_t*)vhash + lane * 32, 32 ) != 0 )
+         {
+            applog( LOG_ERR,
+                    "SkyDoge 4-way differential FAILED: iter %d lane %d", it, lane );
+            return false;
+         }
+      }
    }
-   applog( LOG_ERR, "SkyDoge 4-way self-test FAILED (consensus KAT mismatch)" );
-   applog( LOG_ERR, "  got(lane0): %s", got );
-   applog( LOG_ERR, "  expected:   %s", exp );
-   return false;
+
+   applog( LOG_NOTICE,
+           "SkyDoge 4-way self-test PASSED (consensus KAT + %dx4 differential)",
+           KITERS );
+   return true;
 }
 
 #endif // SKYDOGE_4WAY

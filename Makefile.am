@@ -307,6 +307,7 @@ cpuminer_SOURCES = \
   algo/x17/sonoa.c \
   algo/x17/skydoge.c \
   algo/x17/skydoge-4way.c \
+  algo/x17/skydoge-8way.c \
   algo/x22/x22i-4way.c \
   algo/x22/x22i.c \
   algo/x22/x22i-gate.c \
