@@ -14,7 +14,7 @@
 #include "algo/cubehash/cubehash_sse2.h"
 #include "algo/shavite/sph_shavite.h"
 #include "algo/simd/simd-hash-2way.h"
-#ifdef __AES__
+#if defined(__AES__) || defined(__ARM_FEATURE_AES)
   #include "algo/groestl/aes_ni/hash-groestl.h"
 #else
   #include "algo/groestl/sph_groestl.h"
@@ -34,7 +34,7 @@ typedef struct {
         cubehashParam           cube;
         sph_shavite512_context  shavite;
         simd512_context         simd;
-#ifdef __AES__
+#if defined(__AES__) || defined(__ARM_FEATURE_AES)
         hashState_groestl       groestl;
 #else
         sph_groestl512_context  groestl;
@@ -54,7 +54,7 @@ void init_tt10_ctx()
         init_luffa( &tt10_ctx.luffa, 512 );
         cubehashInit( &tt10_ctx.cube, 512, 16, 32 );
         sph_shavite512_init( &tt10_ctx.shavite );
-#ifdef __AES__
+#if defined(__AES__) || defined(__ARM_FEATURE_AES)
         init_groestl( &tt10_ctx.groestl, 64 );
 #else
         sph_groestl512_init( &tt10_ctx.groestl );
@@ -117,7 +117,7 @@ void timetravel10_hash(void *output, const void *input)
         }
         break;
      case 2:
-#ifdef __AES__
+#if defined(__AES__) || defined(__ARM_FEATURE_AES)
            update_and_final_groestl( &ctx.groestl, (char*)hashB,
                                     (char*)hashA, dataLen*8 );
 #else
