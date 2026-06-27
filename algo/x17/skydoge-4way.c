@@ -199,7 +199,7 @@ int skydoge_4x64_hash( void *output, const void *input, int thr_id )
    {
       simd512_ctx( &sx.simd, lane[l], lane[l], 64 );
       lane_echo( &sx, lane[l] );
-      cubehash_full( &sx.cube, (byte*)lane[l], 512, (const byte*)lane[l], 64 );
+      cubehash_full( &sx.cube, lane[l], 512, lane[l], 64 );
       sph_shavite512_init( &sx.shavite );
       sph_shavite512( &sx.shavite, lane[l], 64 );
       sph_shavite512_close( &sx.shavite, lane[l] );

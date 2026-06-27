@@ -123,7 +123,7 @@ int skydoge_hash( void *output, const void *input, int thr_id )
    sph_echo512_close( &ctx.echo, hash );
 #endif
 
-   cubehash_full( &ctx.cube, (byte*)hash, 512, (const byte*)hash, 64 );// 10
+   cubehash_full( &ctx.cube, hash, 512, hash, 64 );// 10
 
    sph_shavite512_init( &ctx.shavite );                                // 11
    sph_shavite512( &ctx.shavite, hash, 64 );
