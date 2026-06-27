@@ -233,7 +233,11 @@ bool     opt_bell = false;
 // instead of exponential notation (e.g. 170100 -> "170.10k", 2.26e6 -> "2.26M").
 static const char *format_diff( char *buf, size_t bufsz, double d )
 {
-   if ( d < 1e3 )       snprintf( buf, bufsz, "%.4g",  d );
+   if ( d == 0.0 )      snprintf( buf, bufsz, "0" );
+   // %.4g switches to exponential (e.g. 3.78e-06) once d < 1e-4; use fixed
+   // notation for sub-unity diffs so small shares read as 0.00000378.
+   else if ( d < 1.0 )  snprintf( buf, bufsz, "%.8f", d );
+   else if ( d < 1e3 )  snprintf( buf, bufsz, "%.4g",  d );
    else if ( d < 1e6 )  snprintf( buf, bufsz, "%.2fk", d / 1e3  );
    else if ( d < 1e9 )  snprintf( buf, bufsz, "%.2fM", d / 1e6  );
    else if ( d < 1e12 ) snprintf( buf, bufsz, "%.2fG", d / 1e9  );
@@ -1358,9 +1362,15 @@ static int share_result( int result, struct work *work,
    }
 
    const char *bell = !result && opt_bell ? &ASCII_BELL : "";
-   applog( LOG_INFO, "%s%d %s%s %s%s %s%s %s%s%s, %.3f sec (%dms)",
+   // One-liner: fold the former separate "Submitted Diff/Block/Job" line into
+   // the result line so each share is a single compact entry.
+   char sdiff[32];
+   format_diff( sdiff, sizeof sdiff, my_stats.share_diff );
+   applog( LOG_INFO,
+           "%s%d %s%s %s%s %s%s %s%s%s, Diff %s, Block %u, Job %s, %.3f sec (%dms)",
            bell, my_stats.share_count, acol, ares, scol, sres, rcol, rres,
-           bcol, bres, use_colors ? CL_N : "", share_time, latency );
+           bcol, bres, use_colors ? CL_N : "", sdiff, my_stats.height,
+           my_stats.job_id, share_time, latency );
    if ( unlikely( !( opt_quiet || result || stale ) ) )
    {
       applog2( LOG_INFO, "%sReject reason: %s", bell, reason ? reason : "" );
@@ -1999,9 +2009,12 @@ bool submit_solution( struct work *work, const void *hash,
      {
         if ( have_stratum )
         {
-           applog( LOG_INFO, "%d Submitted Diff %.5g, Block %d, Job %s",
-                   submitted_share_count, work->sharediff, work->height,
-                   work->job_id );
+           // Submit details are folded into the single result line in
+           // share_result(); keep the standalone line for debug only.
+           if ( opt_debug )
+              applog( LOG_INFO, "%d Submitted Diff %.5g, Block %d, Job %s",
+                      submitted_share_count, work->sharediff, work->height,
+                      work->job_id );
            if ( opt_debug && opt_extranonce )
            {
               unsigned char *xnonce2str = abin2hex( work->xnonce2,
@@ -2010,7 +2023,7 @@ bool submit_solution( struct work *work, const void *hash,
               free( xnonce2str );
            }
         }
-        else
+        else if ( opt_debug )
            applog( LOG_INFO, "%d Submitted Diff %.5g, Block %d, Ntime %08x",
                    submitted_share_count, work->sharediff, work->height,
                    work->data[ algo_gate.ntime_index ] );
