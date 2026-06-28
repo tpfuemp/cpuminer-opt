@@ -643,6 +643,7 @@ enum algos {
         ALGO_GROESTL,
         ALGO_HEX,
         ALGO_HMQ1725,
+        ALGO_HOOHASHV110,    /* PePePoW                            */
         ALGO_JHA,
         ALGO_KECCAK,
         ALGO_KECCAKC,
@@ -750,6 +751,7 @@ static const char* const algo_names[] = {
         "groestl",
         "hex",
         "hmq1725",
+        "hoohashv110",
         "jha",
         "keccak",
         "keccakc",
