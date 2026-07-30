@@ -922,9 +922,12 @@ Options:\n\
                           equihash192   ZeroClassic (192/7, ~3 GB)\n\
                           equihash125   Flux/ZelCash (125/4, ~4 GB)\n\
                             Aliases: flux, zelcash, zel\n\
+                          flex          Kylacoin\n\
+                          ghostrider    Raptoreum (RTM)\n\
                           groestl       Groestl coin\n\
                           hex           x16r-hex\n\
                           hmq1725       Espers\n\
+                          hoohashv110   PepePow\n\
                           jha           jackppot (Jackpotcoin)\n\
                           keccak        Maxcoin\n\
                           keccakc       Creative Coin\n\
@@ -941,6 +944,7 @@ Options:\n\
                           minotaurx\n\
                           neoscrypt     NeoScrypt(128, 2, 1)\n\
                           nist5         Nist5\n\
+                          odo           Odocrypt, DigiByte (DGB)\n\
                           pentablake    5 x blake512\n\
                           phi1612       phi\n\
                           phi2\n\
@@ -961,6 +965,7 @@ Options:\n\
                           skein         Skein+Sha (Skeincoin)\n\
                           skein2        Double Skein (Woodcoin)\n\
                           skunk         Signatum (SIGT)\n\
+                          skydoge       SkyDoge\n\
                           sonoa         Sono\n\
                           timetravel    timeravel8, Machinecoin (MAC)\n\
                           timetravel10  Bitcore (BTX)\n\

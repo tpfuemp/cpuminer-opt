@@ -75,10 +75,12 @@ Supported Algorithms
                           equihash125   Equihash 125/4 (Flux, ZelCash)
                           equihash144   Equihash 144/5 (Bitcoin Gold)
                           equihash192   Equihash 192/7 (ZeroClassic)
+                          flex          Kylacoin
                           ghostrider    Raptoreum (RTM)
                           groestl       Groestl coin
                           hex           x16r-hex
                           hmq1725       
+                          hoohashv110   PepePow
                           jha           Jackpotcoin
                           keccak        Maxcoin
                           keccakc       Creative coin
