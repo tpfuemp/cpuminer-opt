@@ -229,6 +229,10 @@ cpuminer_SOURCES = \
   algo/verthash/fopen_utf8.c \
   algo/verthash/tiny_sha3/sha3.c \
   algo/verthash/tiny_sha3/sha3-4way.c \
+  algo/verus/haraka.c \
+  algo/verus/haraka_portable.c \
+  algo/verus/verus_clhash.c \
+  algo/verus/verus-gate.c \
   algo/whirlpool/sph_whirlpool.c \
   algo/whirlpool/whirlpool-gate.c \
   algo/whirlpool/whirlpool.c \

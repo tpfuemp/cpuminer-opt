@@ -48,6 +48,7 @@
 #include "algo-gate-api.h"
 #include "algo/sha/sha256d.h"
 #include "algo/equihash/equihash.h"   /* EQH_DIFF_SCALE */
+#include "algo/verus/verus-gate.h"    /* verus_padded_solution_size */
 
 struct header_info {
 	char		*lp_path;
@@ -2092,6 +2093,13 @@ static bool stratum_notify_equihash(struct stratum_ctx *sctx, json_t *params)
     const char *nbits      = json_string_value(json_array_get(params, 6));
     bool clean = json_is_true(json_array_get(params, 7));
 
+    /* VerusHash: params[8] is the 1344-byte solution template (2688 hex).
+     * For equihash the same slot carries variant strings instead, so this is
+     * keyed on the algo, not on jsize. */
+    const char *verus_sol = NULL;
+    if (opt_algo == ALGO_VERUS && jsize >= 9)
+        verus_sol = json_string_value(json_array_get(params, 8));
+
     /* Optional variant params (10-param extended format) */
     const char *wn_wk_str = NULL;
     const char *personal8 = NULL;
@@ -2129,6 +2137,31 @@ static bool stratum_notify_equihash(struct stratum_ctx *sctx, json_t *params)
     sctx->job.clean       = clean;
     sctx->job.diff        = sctx->next_diff;
     sctx->job.is_equihash = true;
+
+    if (opt_algo == ALGO_VERUS) {
+        /* The pool sends descriptor + PBaaS headers + extra data (281 B) and
+         * expects the padded solution back at the chain's fixed size (1344 B);
+         * see verus_padded_solution_size(). */
+        size_t hexlen = verus_sol ? strlen(verus_sol) : 0;
+        int recv = (int)(hexlen / 2);
+        int need = recv ? verus_padded_solution_size(recv) : 0;
+
+        sctx->job.has_verus_solution = false;
+        if (!verus_sol || (hexlen & 1) || recv < 8 || need > 2048) {
+            applog(LOG_ERR, "Stratum verus notify: missing or unusable solution "
+                            "(%zu hex chars)", hexlen);
+        }
+        else if (!hex2bin(sctx->job.verus_solution, verus_sol, recv)) {
+            applog(LOG_ERR, "Stratum verus notify: solution hex decode failed");
+        }
+        else {
+            memset(sctx->job.verus_solution + recv, 0, (size_t)(need - recv));
+            sctx->job.verus_solution_len = (uint16_t)need;
+            sctx->job.has_verus_solution = true;
+            applog(LOG_DEBUG, "verus solution %d B -> padded %d B (preimage %d)",
+                   recv, need, 143 + need);
+        }
+    }
 
     /* Store variant params so build_extraheader can switch the solver. */
     if (wn_wk_str && personal8) {
@@ -2264,7 +2297,9 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
     /* All Equihash variants share the same notify format — dispatch to handler */
     if (opt_algo == ALGO_EQUIHASH   || opt_algo == ALGO_EQUIHASH96  ||
         opt_algo == ALGO_EQUIHASH125 || opt_algo == ALGO_EQUIHASH144 ||
-        opt_algo == ALGO_EQUIHASH192)
+        opt_algo == ALGO_EQUIHASH192 ||
+        /* VerusHash shares the 8 positional params and adds a 9th (solution) */
+        opt_algo == ALGO_VERUS)
         return stratum_notify_equihash(sctx, params);
 
     /* Veil SHA256Dv has a bespoke notify format — dispatch to handler */
@@ -2491,12 +2526,24 @@ static bool stratum_set_target(struct stratum_ctx *sctx, json_t *params)
 	 * stratum_gen_work divides by opt_target_factor (= EQH_DIFF_SCALE, set
 	 * in register_equihashXXX_algo) to get diff_internal for diff_to_hash,
 	 * so the correct share target is reconstructed automatically.           */
+	/* Keep the pool's exact target. Verus uses it verbatim (see
+	 * stratum_gen_work): round-tripping through diff_to_hash only reproduces
+	 * the top 128 bits, which can leave our target looser than the pool's. */
+	memcpy(sctx->job.raw_target, tgt, sizeof tgt);
+	sctx->job.has_raw_target = true;
+
 	double diff_internal = hash_to_diff(tgt);
 	if (diff_internal <= 0) {
 		applog(LOG_ERR, "mining.set_target: target yields zero difficulty");
 		return false;
 	}
-	double diff_pool = diff_internal * EQH_DIFF_SCALE;
+	/* Scale to the units the pool operator reports. This used to hardcode
+	 * EQH_DIFF_SCALE; using opt_target_factor instead is behaviour-preserving
+	 * for equihash (register_equihashXXX_algo sets it to exactly that) and lets
+	 * other set_target algos -- VerusHash -- pick their own scale. */
+	const double tgt_scale = ( opt_target_factor > 0.0 ) ? opt_target_factor
+	                                                     : EQH_DIFF_SCALE;
+	double diff_pool = diff_internal * tgt_scale;
 
 	pthread_mutex_lock(&sctx->work_lock);
 	sctx->next_diff = diff_pool;   /* pool scale — same unit as set_difficulty */

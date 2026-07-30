@@ -126,6 +126,7 @@ Supported Algorithms
                           vanilla       blake256r8vnl (VCash)
                           veltor        (VLT)
                           verthash      Vertcoin
+                          verus         VerusHash 2.2 (Verus Coin)
                           whirlpool
                           whirlpoolx
                           x11           Dash

@@ -2199,27 +2199,48 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
    g_work->xnonce2 = (uchar*) realloc( g_work->xnonce2, sctx->xnonce2_size );
    memcpy( g_work->xnonce2, sctx->job.xnonce2, sctx->xnonce2_size );
    algo_gate.build_extraheader( g_work, sctx );
-   /* nbits_to_diff uses 0xFFFF as the Bitcoin difficulty-1 base.
-    * opt_target_factor corrects to the pool's difficulty scale when set.
-    * For standard algos opt_target_factor=1, so net_diff is unchanged.
-    * For equihash opt_target_factor=EQH_DIFF_SCALE=16776960 puts net_diff
-    * in the same units as stratum_diff (pool-reported difficulty).          */
-   /* nbits_to_diff expects the compact-bits word with the exponent in the
-    * low byte (the be32enc form standard algos store). Equihash keeps the
-    * raw little-endian header bytes (exponent in the high byte) because its
-    * data buffer is the literal hashed header, so byte-swap for the diff
-    * calc only — the header bytes are left untouched. Without this the
-    * exponent reads as garbage, nbits_to_diff hits its slow path and returns
-    * 0, so net_diff displayed as 0.                                         */
+   /* nbits_to_diff uses the Bitcoin difficulty-1 base; opt_target_factor then
+    * converts to the pool's scale (1 for standard algos, EQH_DIFF_SCALE for
+    * equihash, putting net_diff in stratum_diff's units).
+    * It also wants the exponent in the compact word's low byte. Equihash and
+    * verus keep the raw little-endian header bytes, exponent high, so swap for
+    * the diff calc only -- otherwise nbits_to_diff takes its slow path and
+    * returns 0, displaying net_diff as 0. Header bytes stay untouched. */
    uint32_t nbits_word = g_work->data[ algo_gate.nbits_index ];
    if ( opt_algo == ALGO_EQUIHASH    || opt_algo == ALGO_EQUIHASH96  ||
         opt_algo == ALGO_EQUIHASH125 || opt_algo == ALGO_EQUIHASH144 ||
-        opt_algo == ALGO_EQUIHASH192 )
+        opt_algo == ALGO_EQUIHASH192 || opt_algo == ALGO_VERUS )
       nbits_word = bswap_32( nbits_word );
    net_diff = nbits_to_diff( nbits_word ) * opt_target_factor;
    algo_gate.set_work_data_endian( g_work );
    }
-   diff_to_hash( g_work->target, g_work->targetdiff );
+   if ( opt_algo == ALGO_VERUS )
+   {
+      /* The pool supplies the solution template; the miner varies only its
+       * last 15 bytes (see algo/verus). Deep-copied by work_copy and freed by
+       * work_free, same ownership as the equihash solver's buffer. */
+      if ( sctx->job.has_verus_solution )
+      {
+         const uint16_t vlen = sctx->job.verus_solution_len;
+         if ( !g_work->equihash_solution )
+            g_work->equihash_solution = (uchar*) malloc( 2048 );
+         if ( g_work->equihash_solution && vlen )
+         {
+            memcpy( g_work->equihash_solution, sctx->job.verus_solution, vlen );
+            g_work->equihash_solution_len = vlen;
+         }
+      }
+      else
+         g_work->equihash_solution_len = 0;
+   }
+
+   /* Verus: use the pool's exact 32-byte target from mining.set_target.
+    * diff_to_hash reproduces only the top 128 bits, which can leave the target
+    * looser than the pool's and cause avoidable rejects. */
+   if ( opt_algo == ALGO_VERUS && sctx->job.has_raw_target )
+      memcpy( g_work->target, sctx->job.raw_target, 32 );
+   else
+      diff_to_hash( g_work->target, g_work->targetdiff );
 
    g_work_time = time(NULL);
    restart_threads();

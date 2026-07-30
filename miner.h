@@ -504,6 +504,16 @@ struct stratum_job
     *   eq_personal e.g. "ZcashPoW", "BgoldPoW"  (8 chars, pool-sent)     */
    char eq_params[16];
    char eq_personal[16];
+   /* VerusHash: the pool supplies the 1344-byte solution as notify param[8]
+    * (the miner varies only its last 15 bytes, so it is a template, not a
+    * solved solution as with equihash). Plus the exact 32-byte target from
+    * mining.set_target -- used verbatim rather than round-tripped through
+    * difficulty, which loses precision. */
+   unsigned char verus_solution[2048];   /* padded to the required size */
+   uint16_t      verus_solution_len;
+   bool          has_verus_solution;
+   uint32_t      raw_target[8];
+   bool          has_raw_target;
    unsigned char denom10[32];
    unsigned char denom100[32];
    unsigned char denom1000[32];
@@ -687,6 +697,7 @@ enum algos {
         ALGO_VANILLA,
         ALGO_VELTOR,
         ALGO_VERTHASH,
+        ALGO_VERUS,
         ALGO_WHIRLPOOL,
         ALGO_WHIRLPOOLX,
         ALGO_X11,
@@ -795,6 +806,7 @@ static const char* const algo_names[] = {
         "vanilla",
         "veltor",
         "verthash",
+        "verus",
         "whirlpool",
         "whirlpoolx",
         "x11",
@@ -973,6 +985,7 @@ Options:\n\
                           vanilla       blake256r8vnl (VCash)\n\
                           veltor\n\
                           verthash\n\
+                          verus         VerusHash 2.2 (Verus Coin)\n\
                           whirlpool\n\
                           whirlpoolx\n\
                           x11           Dash\n\
