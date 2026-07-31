@@ -169,6 +169,12 @@ static __thread uint8_t *cn_long_state_nway = NULL;
 static __thread int cn_kind = CN_BACK_MALLOC;
 static __thread int cn_kind_nway = CN_BACK_MALLOC;
 
+// Multi-MiB allocations, and the hash entry points return void so a failure has
+// nowhere to be reported. All-ones digest exceeds every target: an OOM costs a
+// nonce, not a segfault or a share read from an unwritten buffer.
+#define CN_NO_SCRATCHPAD( out ) \
+   do { memset( out, 0xff, HASH_SIZE ); return; } while ( 0 )
+
 static uint8_t *get_scratchpad( void )
 {
    if ( cn_long_state == NULL )
@@ -203,6 +209,7 @@ static void cryptonight_v1_hash_soft( const void *input, void *output, uint32_t 
 {
    union cn_slow_hash_state state;
    uint8_t *long_state = get_scratchpad();
+   if ( long_state == NULL ) CN_NO_SCRATCHPAD( output );
    uint8_t text[INIT_SIZE_BYTE];
    uint8_t a[AES_BLOCK_SIZE];
    uint8_t b[AES_BLOCK_SIZE];
@@ -418,6 +425,7 @@ static void cryptonight_v1_hash_aes( const void *input, void *output, uint32_t l
 {
    union cn_slow_hash_state state;
    uint8_t *long_state = get_scratchpad();
+   if ( long_state == NULL ) CN_NO_SCRATCHPAD( output );
    __m128i text[INIT_SIZE_BLK];
    __m128i k[10];
    size_t i, j;
@@ -496,6 +504,11 @@ static void cryptonight_v1_Nway_aes( const void *const in[GR_CN_LANES],
 {
    union cn_slow_hash_state state[GR_CN_LANES];
    uint8_t *base = get_scratchpad_nway();
+   if ( base == NULL )
+   {
+      for ( int l = 0; l < GR_CN_LANES; l++ ) memset( out[l], 0xff, HASH_SIZE );
+      return;
+   }
    uint8_t *ls[GR_CN_LANES];
    __m128i  text[INIT_SIZE_BLK], k[10];
    uint64_t a0[GR_CN_LANES], a1[GR_CN_LANES], tweak[GR_CN_LANES], cl[GR_CN_LANES];

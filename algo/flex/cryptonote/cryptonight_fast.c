@@ -199,7 +199,14 @@ struct flex_cryptonightfast_ctx {
 };
 
 void flex_cryptonightfast_hash(const char* input, char* output, uint32_t len, int variant) {
+    /* 2 MiB MEMORY, so unlike the sibling variants this cannot alloca and the
+     * malloc can realistically fail. All-ones digest exceeds every target, so a
+     * failure costs a nonce instead of a deref of NULL. */
     struct flex_cryptonightfast_ctx *ctx = malloc(sizeof(struct flex_cryptonightfast_ctx));
+    if (NULL == ctx) {
+        memset(output, 0xff, HASH_SIZE);
+        return;
+    }
     hash_process(&ctx->state.hs, (const uint8_t*) input, len);
     memcpy(ctx->text, ctx->state.init, INIT_SIZE_BYTE);
     memcpy(ctx->aes_key, ctx->state.hs.b, AES_KEY_SIZE);
