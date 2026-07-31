@@ -85,6 +85,7 @@ Per-algorithm documentation lives in [`algorithms/`](algorithms/):
 - [GhostRider](algorithms/ghostrider.md) — Raptoreum (RTM)
 - [Flex](algorithms/flex.md) — Kylacoin / Lyncoin
 - [x16r and the X16 family](algorithms/x16r.md) — Genix and variants
+- [VerusHash 2.2](algorithms/verus.md) — Verus Coin (VRSC)
 - [Odocrypt](algorithms/odocrypt.md) — DigiByte (DGB)
 - [SHA256Dv](algorithms/sha256dv.md) — Veil (VEIL)
 - [Equihash family](algorithms/equihash.md) — Zcash, Bitcoin Gold, Flux and others

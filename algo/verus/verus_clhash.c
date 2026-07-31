@@ -49,8 +49,14 @@ __m128i lazyLengthHash(uint64_t keylength, uint64_t length) {
 __m128i precompReduction64_si128(__m128i A) {
 
 	//const __m128i C = _mm_set_epi64x(1U,(1U<<4)+(1U<<3)+(1U<<1)+(1U<<0)); // C is the irreducible poly. (64,4,3,1,0)
+#if defined(VERUS_PMULL_EMULATED)
+	/* by a 5-bit constant is a few shifts against ~55 ops for an emulated
+	 * clmul. Identical result; see VRS_CLMUL_X1B. */
+	const  __m128i Q2 = VRS_CLMUL_X1B(A);
+#else
 	const __m128i C = _mm_cvtsi64_si128((1U << 4) + (1U << 3) + (1U << 1) + (1U << 0));
 	const  __m128i Q2 = _mm_clmulepi64_si128(A, C, 0x01);
+#endif
 	const __m128i Q3 = _mm_shuffle_epi8(_mm_setr_epi8(0, 27, 54, 45, 108, 119, 90, 65, (char)216, (char)195, (char)238, (char)245, (char)180, (char)175, (char)130, (char)153),
 		_mm_srli_si128(Q2, 8));
 	const __m128i Q4 = _mm_xor_si128(Q2, A);

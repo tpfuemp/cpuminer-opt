@@ -235,6 +235,124 @@ static uint64_t verus_fnv1a( const void *p, size_t n, uint64_t h )
    return h;
 }
 
+// ---------------------------------------------------------------------------
+// Emulated-primitive vectors (aarch64 without the crypto extension).
+//
+// The KAT below would catch a wrong emulation too, but only as "digest
+// mismatch"; these name the primitive instead, and cover inputs a real block
+// may not reach for hours: all zero, all ones, 0x80 (the xtime carry and the
+// top-bit shift) and each quarter of the S-box index range, which is what
+// selects between the four table registers.
+//
+// Oracles are independent of the vector code: aesenc() from haraka_portable.c,
+// and a 64 step bit loop for the multiply.
+// ---------------------------------------------------------------------------
+#if defined(VERUS_AES_EMULATED) || defined(VERUS_PMULL_EMULATED)
+
+#if defined(VERUS_PMULL_EMULATED)
+static void verus_clmul_ref( uint64_t a, uint64_t b, uint64_t *lo,
+                             uint64_t *hi )
+{
+   uint64_t l = 0, h = 0;
+   for ( int i = 0; i < 64; i++ )
+      if ( ( b >> i ) & 1 )
+      {
+         l ^= a << i;
+         if ( i ) h ^= a >> ( 64 - i );
+      }
+   *lo = l; *hi = h;
+}
+#endif
+
+static bool verus_emu_self_test( void )
+{
+   static const uint8_t fixed[5][16] = {
+      { 0 },
+      { 0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
+        0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff },
+      { 0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,
+        0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80 },
+      { 0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,
+        0x00,0x7f,0xfe,0x3f,0xc0,0x63,0x3c,0xa5 },
+      { 0x00,0x3f,0x40,0x7f,0x80,0xbf,0xc0,0xff,
+        0x01,0x3e,0x41,0x7e,0x81,0xbe,0xc1,0xfe } };
+   const int nfixed = 5, nrand = 4096;
+   uint64_t s = 0x2545f4914f6cdd1dULL;
+
+   for ( int v = 0; v < nfixed + nrand; v++ )
+   {
+      uint8_t _ALIGN(16) in[16], rk[16], got[16], want[16];
+
+      if ( v < nfixed )
+      {
+         memcpy( in, fixed[v], 16 );
+         memcpy( rk, fixed[ ( v + 1 ) % nfixed ], 16 );
+      }
+      else
+         for ( int i = 0; i < 4; i++ )     /* splitmix64 */
+         {
+            uint64_t z = ( s += 0x9e3779b97f4a7c15ULL );
+            z = ( z ^ ( z >> 30 ) ) * 0xbf58476d1ce4e5b9ULL;
+            z = ( z ^ ( z >> 27 ) ) * 0x94d049bb133111ebULL;
+            z ^= z >> 31;
+            memcpy( ( i < 2 ? in : rk ) + ( i & 1 ) * 8, &z, 8 );
+         }
+
+#if defined(VERUS_AES_EMULATED)
+      memcpy( want, in, 16 );
+      aesenc( want, rk );                  /* in place, xors rk at the end */
+      _mm_storeu_si128( (u128*)got, _mm_aesenc_si128( _mm_loadu_si128( (u128*)in ),
+                                                      _mm_loadu_si128( (u128*)rk ) ) );
+      if ( memcmp( got, want, 16 ) != 0 )
+      {
+         applog( LOG_ERR, "VerusHash self-test FAILED: emulated AES round "
+                          "differs from the scalar reference (vector %d)", v );
+         return false;
+      }
+#endif
+
+#if defined(VERUS_PMULL_EMULATED)
+      const u128 va = _mm_loadu_si128( (u128*)in ), vb = _mm_loadu_si128( (u128*)rk );
+      uint64_t al, ah, bl, bh, rl, rh;
+      memcpy( &al, in, 8 ); memcpy( &ah, in + 8, 8 );
+      memcpy( &bl, rk, 8 ); memcpy( &bh, rk + 8, 8 );
+
+      for ( int c = 0; c < 5; c++ )
+      {
+         switch ( c )
+         {
+         case 0: verus_clmul_ref( al, bl, &rl, &rh );
+                 _mm_storeu_si128( (u128*)got, _mm_clmulepi64_si128( va, vb, 0x00 ) );
+                 break;
+         case 1: verus_clmul_ref( ah, bl, &rl, &rh );
+                 _mm_storeu_si128( (u128*)got, _mm_clmulepi64_si128( va, vb, 0x01 ) );
+                 break;
+         case 2: verus_clmul_ref( al, bh, &rl, &rh );
+                 _mm_storeu_si128( (u128*)got, _mm_clmulepi64_si128( va, vb, 0x10 ) );
+                 break;
+         case 3: verus_clmul_ref( ah, bh, &rl, &rh );
+                 _mm_storeu_si128( (u128*)got, _mm_clmulepi64_si128( va, vb, 0x11 ) );
+                 break;
+         /* the sparse-constant shortcut precompReduction64_si128 takes */
+         default: verus_clmul_ref( ah, 0x1b, &rl, &rh );
+                 _mm_storeu_si128( (u128*)got, VRS_CLMUL_X1B( va ) );
+                 break;
+         }
+         memcpy( want, &rl, 8 ); memcpy( want + 8, &rh, 8 );
+         if ( memcmp( got, want, 16 ) != 0 )
+         {
+            applog( LOG_ERR, "VerusHash self-test FAILED: emulated carryless "
+                             "multiply case %d differs from the scalar "
+                             "reference (vector %d)", c, v );
+            return false;
+         }
+      }
+#endif
+   }
+   return true;
+}
+#endif  /* VERUS_AES_EMULATED || VERUS_PMULL_EMULATED */
+
 bool verus_self_test( void )
 {
    verus_ctx_t *ctx = verus_get_ctx();
@@ -243,6 +361,12 @@ bool verus_self_test( void )
       applog( LOG_ERR, "VerusHash: context allocation failed" );
       return false;
    }
+
+#if defined(VERUS_AES_EMULATED) || defined(VERUS_PMULL_EMULATED)
+   /* before the KAT, so a primitive failure is not reported as a digest
+    * mismatch 300 Haraka calls later */
+   if ( !verus_emu_self_test() ) return false;
+#endif
 
    uint8_t _ALIGN(32) pre[VERUS_KAT_PREIMAGE];
    uint32_t fixrand[32], fixrandex[32];
@@ -501,6 +625,22 @@ bool register_verus_algo( algo_gate_t *gate )
    (void)gate;
    return false;
 #else
+#if defined(VERUS_AES_EMULATED) || defined(VERUS_PMULL_EMULATED)
+   /* Loud: A53/A72 cores really do lack these, but a Pi 4 building for plain
+    * armv8-a when it could use +crypto is a misconfiguration, not a limit. */
+   applog( LOG_WARNING, "VerusHash: emulating %s in NEON -- this core (or this "
+                        "build) has no ARMv8 crypto extension, expect roughly a "
+                        "quarter of the hashrate. If the CPU does have it, "
+                        "rebuild with -march=armv8-a+crypto.",
+#if defined(VERUS_AES_EMULATED) && defined(VERUS_PMULL_EMULATED)
+           "AES and carryless multiply"
+#elif defined(VERUS_AES_EMULATED)
+           "AES"
+#else
+           "carryless multiply"
+#endif
+         );
+#endif
    if ( !verus_self_test() )
    {
       applog( LOG_ERR, "VerusHash self-test failed" );
@@ -511,7 +651,13 @@ bool register_verus_algo( algo_gate_t *gate )
    gate->build_extraheader     = (void*)&equihash_build_extraheader;
    gate->build_stratum_request = (void*)&equihash_build_stratum_request;
    gate->get_work_data_size    = (void*)&equihash_get_work_data_size;
+   /* informational only in this tree, but must not claim an AES unit the
+    * emulated build is not using */
+#if defined(VERUS_AES_EMULATED)
+   gate->optimizations = SSE2_OPT | AVX2_OPT | NEON_OPT;
+#else
    gate->optimizations = SSE2_OPT | AES_OPT | AVX2_OPT | NEON_OPT;
+#endif
    gate->ntime_index   = VRS_NTIME_INDEX;
    gate->nbits_index   = VRS_NBITS_INDEX;
    gate->nonce_index   = VRS_NONCE_INDEX;

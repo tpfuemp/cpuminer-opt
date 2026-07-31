@@ -1,7 +1,10 @@
 /* The 17 x86 intrinsics the vendored VerusHash sources use, mapped to NEON, so
  * those files stay byte-identical to upstream (which uses a full sse2neon shim).
- * Needs ARMv8 AES + PMULL; verus-simd.h checks. _mm_aesenc_si128 and
- * _mm_mulhrs_epi16 are not the obvious one-liner. */
+ * _mm_aesenc_si128 and _mm_mulhrs_epi16 are not the obvious one-liner.
+ *
+ * AES and PMULL64 are selected independently below; a core without either
+ * (Cortex-A53/A72: Pi 3, Pi 4, RK3328...) gets the bit-exact emulations from
+ * simd-utils rather than having VerusHash compiled out. The rest is base ASIMD. */
 #ifndef VERUS_NEON_H
 #define VERUS_NEON_H
 
@@ -15,10 +18,26 @@ typedef uint8x16_t __m128i;
 #define vrs_u32( v )   vreinterpretq_u32_u8( v )
 #define vrs_s16( v )   vreinterpretq_s16_u8( v )
 
+/* FORCE_VERUS_AES_EMU / FORCE_VERUS_PMULL_EMU emulate on a core that has the
+ * instruction, so the KAT covers the emulation without a Pi 3 on the desk. */
+#if ( defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO) ) \
+      && !defined(FORCE_VERUS_AES_EMU)
+
 /* x86 xors the round key after the round, arm64 aese before it: encrypt with a
  * zero key and xor after. Same form as v128_aesencxor in simd-utils. */
 static inline __m128i _mm_aesenc_si128( __m128i v, __m128i k )
 { return veorq_u8( vaesmcq_u8( vaeseq_u8( v, vdupq_n_u8( 0 ) ) ), k ); }
+
+#else
+
+#define VERUS_AES_EMULATED 1
+#include "simd-utils/simd-neon-aes.h"
+
+/* the emulation is already x86 shaped */
+static inline __m128i _mm_aesenc_si128( __m128i v, __m128i k )
+{ return v128_aes_emu_enc( v, k ); }
+
+#endif
 
 static inline __m128i _mm_xor_si128( __m128i a, __m128i b )
 { return veorq_u8( a, b ); }
@@ -94,6 +113,9 @@ static inline __m128i _mm_mulhrs_epi16( __m128i a, __m128i b )
 /* byte shift right, zero filled */
 #define _mm_srli_si128( v, n )  vextq_u8( v, vdupq_n_u8( 0 ), n )
 
+#if ( defined(__ARM_FEATURE_PMULL) || defined(__ARM_FEATURE_CRYPTO) ) \
+      && !defined(FORCE_VERUS_PMULL_EMU)
+
 /* imm bit 0 picks a's 64-bit half, bit 4 picks b's. Operands hoisted to locals
  * so the branches (imm is always literal, so one survives) cannot
  * double-evaluate. */
@@ -107,5 +129,32 @@ static inline __m128i _mm_mulhrs_epi16( __m128i a, __m128i b )
    : (imm) == 0x01 ? VRS_CLMUL( _cla, _clb, 1, 0 ) \
    : (imm) == 0x10 ? VRS_CLMUL( _cla, _clb, 0, 1 ) \
    :                 VRS_CLMUL( _cla, _clb, 1, 1 ); })
+
+#else
+
+#define VERUS_PMULL_EMULATED 1
+#include "simd-utils/simd-neon-clmul.h"
+
+/* Same imm dispatch, but the emulation wants 8-byte halves, so pick the half up
+ * front: vget_low/high are register subviews and cost nothing. */
+#define VRS_CLMUL( a, b, la, lb ) \
+   v128_pmull_emu( vreinterpret_p8_u8( vget_##la##_u8( a ) ), \
+                   vreinterpret_p8_u8( vget_##lb##_u8( b ) ) )
+
+#define _mm_clmulepi64_si128( va, vb, imm ) __extension__({ \
+   const __m128i _cla = ( va ), _clb = ( vb ); \
+     (imm) == 0x00 ? VRS_CLMUL( _cla, _clb, low,  low  ) \
+   : (imm) == 0x01 ? VRS_CLMUL( _cla, _clb, high, low  ) \
+   : (imm) == 0x10 ? VRS_CLMUL( _cla, _clb, low,  high ) \
+   :                 VRS_CLMUL( _cla, _clb, high, high ); })
+
+/* precompReduction64_si128() multiplies the high half by 0x1b, which in GF(2)[x]
+ * is A ^ (A<<1) ^ (A<<3) ^ (A<<4) -- shifts, not the 8-column product. Once per
+ * hash against ~80 clmuls, so worth ~1%; it lives here because a macro cannot
+ * see the constant. */
+#define VRS_CLMUL_X1B( va ) \
+   v128_pmull_emu_small( vextq_u64( vrs_u64( va ), vdupq_n_u64( 0 ), 1 ), 0x1b )
+
+#endif
 
 #endif  /* VERUS_NEON_H */
