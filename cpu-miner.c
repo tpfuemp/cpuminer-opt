@@ -333,7 +333,13 @@ static inline void drop_policy(void)
 }
 
 #ifdef __BIONIC__
-#define pthread_setaffinity_np(tid,sz,s) {} /* only do process affinity */
+/* bionic (Android, Termux) has no pthread_setaffinity_np. sched_setaffinity does
+ * take a thread id though, and affine_to_cpu() runs on the very thread it is
+ * binding, so this is equivalent -- and unlike the previous no-op it makes
+ * --cpu-affinity work, which matters on the big.LITTLE SoCs Android runs on. */
+#include <sys/syscall.h>
+#define pthread_setaffinity_np(tid,sz,s) \
+   sched_setaffinity( syscall( __NR_gettid ), sz, s )
 #endif
 
 static void affine_to_cpu( struct thr_info *thr )

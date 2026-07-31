@@ -245,7 +245,9 @@ int scanhash_timetravel( struct work *work, uint32_t max_nonce,
            sph_bmw512( &tt_mid.bmw, endiandata, 64 );
            break;
         case 2:
-#ifndef __AES__
+/* must match the guard on the context type above: with ARM AES the member is a
+ * hashState_groestl and there is no midstate to take. */
+#if !defined(__AES__) && !defined(__ARM_FEATURE_AES)
            memcpy( &tt_mid.groestl, &tt_ctx.groestl, sizeof(tt_mid.groestl ) );
            sph_groestl512( &tt_mid.groestl, endiandata, 64 );
 #endif

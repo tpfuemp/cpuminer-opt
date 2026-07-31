@@ -16,6 +16,7 @@
 #include <memory.h>
 #include <unistd.h>
 #include "algo-gate-api.h"
+#include "algo-registrations.h"
 
 // Define null and standard functions.
 //
@@ -276,10 +277,6 @@ static void init_algo_gate( algo_gate_t* gate )
    gate->work_cmp_size           = STD_WORK_CMP_SIZE;
 }
 
-// Ignore warnings for not yet defined register functions
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wimplicit-function-declaration"
-
 // Called once by main
 bool register_algo_gate( int algo, algo_gate_t *gate )
 {
@@ -409,9 +406,6 @@ bool register_algo_gate( int algo, algo_gate_t *gate )
   }
   return true;
 }
-
-// restore warnings
-#pragma GCC diagnostic pop
 
 void exec_hash_function( int algo, void *output, const void *pdata )
 {

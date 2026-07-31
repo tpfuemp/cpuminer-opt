@@ -26,6 +26,7 @@
 #include "haraka.h"
 #include "haraka_portable.h"
 #include "verus_clhash.h"
+#include "verus-kat.h"
 
 // ---------------------------------------------------------------------------
 // Per-thread state.
@@ -58,9 +59,18 @@ static verus_ctx_t *verus_get_ctx( void )
    return verus_ctx;
 }
 
-#define VERUS_KAT_PREIMAGE 1487   /* fixed-size instance the KAT was made on */
-#define VERUS_BENCH_SOL_SIZE 1344 /* 143+1344 = 1487 == 15 (mod 32) */
-static void verus_test_preimage( uint8_t out[VERUS_KAT_PREIMAGE] );
+/* CBlockHeader::ClearNonCanonicalData(): merge-mined chains must all validate
+ * the same PoW, so chain-specific fields are zeroed and anything the miner
+ * varies moves into the 15 solution bytes. nVersion and nTime stay -- they are
+ * shared across the merged blocks. The self-test runs this same function over a
+ * real block, which is what pins these offsets. */
+static void verus_clear_noncanonical( uint8_t *pre )
+{
+   memset( pre + 4, 0, 96 );                    /* prevhash, merkle, saplingroot */
+   memset( pre + 104, 0, 4 );                   /* nBits  */
+   memset( pre + 108, 0, 32 );                  /* nNonce */
+   memset( pre + VERUS_BASE_SIZE + 8, 0, 64 );  /* hashPrev/BlockMMRRoot */
+}
 
 // ---------------------------------------------------------------------------
 // Chain functions (transcribed from verusscan.cpp)
@@ -207,28 +217,14 @@ int verushash_full( void *output, const void *preimage, int pre_len )
 }
 
 // ---------------------------------------------------------------------------
-// Self-test: KAT + two free invariants.
+// Self-test: real-block KAT + two free invariants.
 //
-// The vector is a deterministic splitmix64 preimage, cross-checked against the
-// unmodified upstream sources by the reference-vector generator -- keep the two
-// preimage builders in step. A real-block vector should replace it when one is
-// available.
+// verus-kat.h holds a mainnet block exactly as the chain serializes it, and its
+// published hash. Reproducing that hash means the whole chain, the canonical
+// clearing and the nonce placement agree with consensus -- not merely with a
+// vector this code produced. Only the two stage checkpoints are ours, and they
+// exist so a failure names the stage instead of just the digest.
 // ---------------------------------------------------------------------------
-static void verus_test_preimage( uint8_t out[VERUS_KAT_PREIMAGE] )
-{
-   uint64_t s = 0x9E3779B97F4A7C15ULL;
-   for ( int i = 0; i < VERUS_KAT_PREIMAGE; i++ )
-   {
-      s += 0x9E3779B97F4A7C15ULL;
-      uint64_t z = s;
-      z = ( z ^ ( z >> 30 ) ) * 0xBF58476D1CE4E5B9ULL;
-      z = ( z ^ ( z >> 27 ) ) * 0x94D049BB133111EBULL;
-      z ^= z >> 31;
-      out[i] = (uint8_t)z;
-   }
-   out[140] = 0xfd; out[141] = 0x40; out[142] = 0x05;   /* CompactSize 1344 */
-}
-
 static uint64_t verus_fnv1a( const void *p, size_t n, uint64_t h )
 {
    for ( size_t i = 0; i < n; i++ )
@@ -241,13 +237,6 @@ static uint64_t verus_fnv1a( const void *p, size_t n, uint64_t h )
 
 bool verus_self_test( void )
 {
-   /* generated from the unmodified upstream sources */
-   static const uint8_t kat_half[32] = {
-      0xa0,0x58,0x31,0x2b,0xc3,0xac,0x0f,0xf6,0x42,0x26,0x6b,0x7b,0x1c,0x55,0x2d,0x7f,
-      0x46,0x68,0x48,0x0e,0xa6,0xd3,0xc5,0x8a,0xf8,0xcd,0x47,0x52,0x61,0xae,0xce,0x9d };
-   static const uint32_t kat_vhash7[2] = { 0x16ea4dca, 0xfbcbf257 };
-   static const uint64_t kat_key_fnv   = 0x30a6a190e954b165ULL;
-
    verus_ctx_t *ctx = verus_get_ctx();
    if ( ctx == NULL )
    {
@@ -260,10 +249,11 @@ bool verus_self_test( void )
    u128 *g_prand   = ctx->key + VERUS_KEY_SIZE128;
    u128 *g_prandex = ctx->key + VERUS_KEY_SIZE128 + 32;
 
-   verus_test_preimage( pre );
+   memcpy( pre, verus_kat_block, VERUS_KAT_PREIMAGE );
+   verus_clear_noncanonical( pre );     /* solution version 8, so PBaaS */
    VerusHashHalf( ctx->half, pre, VERUS_KAT_PREIMAGE - VERUS_NONCE_SPACE );
 
-   if ( memcmp( ctx->half, kat_half, 32 ) != 0 )
+   if ( memcmp( ctx->half, verus_kat_half, 32 ) != 0 )
    {
       applog( LOG_ERR, "VerusHash self-test FAILED: VerusHashHalf mismatch" );
       return false;
@@ -272,55 +262,65 @@ bool verus_self_test( void )
    GenNewCLKey( ctx->half, ctx->key );
    const uint64_t key_fnv =
       verus_fnv1a( ctx->key, VERUS_KEY_SIZE, 1469598103934665603ULL );
-   if ( key_fnv != kat_key_fnv )
+   if ( key_fnv != VERUS_KAT_KEY_FNV )
    {
       applog( LOG_ERR, "VerusHash self-test FAILED: GenNewCLKey mismatch "
-                       "(%016llx want %016llx)",
-              (unsigned long long)key_fnv, (unsigned long long)kat_key_fnv );
+                       "(%016llx want %016llx)", (unsigned long long)key_fnv,
+              (unsigned long long)VERUS_KAT_KEY_FNV );
       return false;
    }
 
-   for ( int n = 0; n < 2; n++ )
+   /* The block's own nonce is already in place, so the digest must come out as
+    * its published hash. Both keyed-Haraka paths are exercised: the inner loop's
+    * truncated one, then the candidate path's full one. */
+   uint8_t *nonce = pre + VERUS_KAT_PREIMAGE - VERUS_NONCE_SPACE;
+   uint8_t _ALIGN(32) curBuf[64];
+   uint8_t hash[32] = {0};
+
+   memcpy( curBuf, ctx->half, 64 );
+   Verus2hash( hash, curBuf, nonce, ctx->key,
+               fixrand, fixrandex, g_prand, g_prandex, false );
+
+   if ( memcmp( hash + 28, verus_kat_hash + 28, 4 ) != 0 )
    {
-      uint8_t _ALIGN(32) curBuf[64];
-      uint8_t hash[32] = {0};
-      uint8_t nonce[VERUS_NONCE_SPACE] = {0};
-
-      memcpy( curBuf, ctx->half, 64 );
-      nonce[11] = (uint8_t)( n       ); nonce[12] = (uint8_t)( n >>  8 );
-      nonce[13] = (uint8_t)( n >> 16 ); nonce[14] = (uint8_t)( n >> 24 );
-
-      Verus2hash( hash, curBuf, nonce, ctx->key,
-                  fixrand, fixrandex, g_prand, g_prandex, false );
-
-      if ( ((uint32_t*)hash)[7] != kat_vhash7[n] )
+      uint32_t got, want;
+      memcpy( &got, hash + 28, 4 ); memcpy( &want, verus_kat_hash + 28, 4 );
+      applog( LOG_ERR, "VerusHash self-test FAILED: block %d vhash[7] %08x "
+                       "want %08x", VERUS_KAT_HEIGHT, got, want );
+      return false;
+   }
+   /* invariant: the AES-NI keyed Haraka writes ONLY bytes 28..31 */
+   for ( int i = 0; i < 28; i++ )
+      if ( hash[i] != 0 )
       {
-         applog( LOG_ERR, "VerusHash self-test FAILED at nonce %d: "
-                          "vhash[7] %08x want %08x", n,
-                 ((uint32_t*)hash)[7], kat_vhash7[n] );
+         applog( LOG_ERR, "VerusHash self-test FAILED: truncated Haraka wrote "
+                          "byte %d -- inner loop assumption broken", i );
          return false;
       }
-      /* invariant: the AES-NI keyed Haraka writes ONLY bytes 28..31 */
-      for ( int i = 0; i < 28; i++ )
-         if ( hash[i] != 0 )
-         {
-            applog( LOG_ERR, "VerusHash self-test FAILED: truncated Haraka "
-                             "wrote byte %d -- inner loop assumption broken", i );
-            return false;
-         }
-      /* invariant: FixKey must restore the key to pristine after every hash */
-      if ( verus_fnv1a( ctx->key, VERUS_KEY_SIZE, 1469598103934665603ULL )
-           != kat_key_fnv )
-      {
-         applog( LOG_ERR, "VerusHash self-test FAILED: FixKey did not restore "
-                          "the key (journal order bug?)" );
-         return false;
-      }
+   /* invariant: FixKey must restore the key to pristine after every hash */
+   if ( verus_fnv1a( ctx->key, VERUS_KEY_SIZE, 1469598103934665603ULL )
+        != VERUS_KAT_KEY_FNV )
+   {
+      applog( LOG_ERR, "VerusHash self-test FAILED: FixKey did not restore the "
+                       "key (journal order bug?)" );
+      return false;
+   }
+
+   memcpy( curBuf, ctx->half, 64 );
+   Verus2hash( hash, curBuf, nonce, ctx->key,
+               fixrand, fixrandex, g_prand, g_prandex, true );
+
+   if ( memcmp( hash, verus_kat_hash, 32 ) != 0 )
+   {
+      applog( LOG_ERR, "VerusHash self-test FAILED: block %d digest mismatch",
+              VERUS_KAT_HEIGHT );
+      return false;
    }
 
    ctx->valid = false;
-   applog( LOG_NOTICE, "VerusHash 2.2 self-test PASSED "
-                       "(half + key + 2 KAT vectors + FixKey/truncation invariants)" );
+   applog( LOG_NOTICE, "VerusHash 2.2 self-test PASSED (mainnet block %d hash "
+                       "reproduced on both keyed-Haraka paths)",
+           VERUS_KAT_HEIGHT );
    return true;
 }
 
@@ -365,20 +365,10 @@ int scanhash_verus( struct work *work, uint32_t max_nonce,
          *hashes_done = 0;
          return 0;
       }
-      static uint8_t bench_sol[VERUS_BENCH_SOL_SIZE];
-      static bool bench_sol_init = false;
-      if ( !bench_sol_init )
-      {
-         uint8_t pre[VERUS_KAT_PREIMAGE];
-         verus_test_preimage( pre );
-         memcpy( bench_sol, pre + VERUS_BASE_SIZE, VERUS_BENCH_SOL_SIZE );
-         /* PBaaS, so --benchmark measures the path real jobs take */
-         bench_sol[0] = 8;                 /* solution version >= 7 */
-         bench_sol[5] = 1;                 /* numPBaaSHeaders > 0   */
-         bench_sol_init = true;
-      }
-      solution = bench_sol;
-      sol_size = VERUS_BENCH_SOL_SIZE;
+      /* the KAT block's own solution: real descriptor, so --benchmark measures
+       * the PBaaS path real jobs take */
+      solution = verus_kat_block + VERUS_BASE_SIZE;
+      sol_size = VERUS_KAT_PREIMAGE - VERUS_BASE_SIZE;
    }
    ctx->warned_no_solution = false;
 
@@ -412,18 +402,10 @@ int scanhash_verus( struct work *work, uint32_t max_nonce,
    sol_data[2] = (uint8_t)( sol_size >> 8 );
    memcpy( sol_data + 3, solution, sol_size );
 
-   /* PBaaS canonical header, mirroring CBlockHeader::ClearNonCanonicalData():
-    * merge-mined chains must all validate the same PoW, so chain-specific fields
-    * are zeroed and anything the miner varies moves into the 15 solution bytes.
-    * nVersion and nTime stay -- they are shared across the merged blocks. */
    const bool pbaas = ( solution[0] >= 7 && solution[5] > 0 );
    if ( pbaas )
    {
-      memset( full + 4, 0, 96 );              /* prevhash, merkle, saplingroot */
-      memset( full + 104, 0, 4 );             /* nBits  */
-      memset( full + 108, 0, 32 );            /* nNonce */
-      memset( sol_data + 3 + 8, 0, 64 );      /* hashPrevMMRRoot, hashBlockMMRRoot */
-
+      verus_clear_noncanonical( full );
       memcpy( nonceSpace,     &pdata[27], 7 );   /* pool extranonce1        */
       memcpy( nonceSpace + 7, &pdata[VRS_NONCESPACE_INDEX], 4 );
    }

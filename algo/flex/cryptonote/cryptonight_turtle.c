@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>   /* _exit, called by VARIANT1_INIT */
 #include "../../gr/cryptonote/crypto/oaes_lib.h"
 #include "../../gr/cryptonote/crypto/c_keccak.h"
 #include "../../gr/cryptonote/crypto/c_groestl.h"

@@ -33,7 +33,8 @@ The old thread has been locked but still contains useful information for
 reading.
 
 See file RELEASE_NOTES for change log and INSTALL_LINUX or INSTALL_WINDOWS
-for compile instructions.
+for compile instructions. On Termux (Android, aarch64) use build-termux.sh,
+which builds with clang; INSTALL_LINUX section 4b lists the packages.
 
 Requirements
 ------------

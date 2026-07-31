@@ -35,7 +35,9 @@ static const char _NR[] = {
  
 #include <stddef.h>
 #include <time.h> 
+#if defined(WIN32) || defined(_WIN32)
 #include <sys/timeb.h>
+#endif
 #ifdef __APPLE__
 #include <malloc/malloc.h>
 #else 
@@ -463,14 +465,34 @@ OAES_RET oaes_sprintf(
 	return OAES_RET_SUCCESS;
 }
 
+/* SVID ftime() and <sys/timeb.h> are obsolete and absent from some libcs --
+ * bionic, hence Termux -- while clock_gettime is POSIX and present everywhere.
+ * Same two fields, so the seed arithmetic below is unchanged. */
+struct oaes_time { time_t time; unsigned short millitm; };
+
+static void oaes_get_time( struct oaes_time *t )
+{
+#if defined(WIN32) || defined(_WIN32)
+	struct timeb tb;
+	ftime( &tb );
+	t->time = tb.time;
+	t->millitm = tb.millitm;
+#else
+	struct timespec ts;
+	clock_gettime( CLOCK_REALTIME, &ts );
+	t->time = ts.tv_sec;
+	t->millitm = (unsigned short)( ts.tv_nsec / 1000000 );
+#endif
+}
+
 #ifdef OAES_HAVE_ISAAC
 static void oaes_get_seed( char buf[RANDSIZ + 1] )
 {
-	struct timeb timer;
+	struct oaes_time timer;
 	struct tm *gmTimer;
 	char * _test = NULL;
 	
-	ftime (&timer);
+	oaes_get_time( &timer );
 	gmTimer = gmtime( &timer.time );
 	_test = (char *) calloc( sizeof( char ), timer.millitm );
 	sprintf( buf, "%04d%02d%02d%02d%02d%02d%03d%p%d",
@@ -484,12 +506,12 @@ static void oaes_get_seed( char buf[RANDSIZ + 1] )
 #else
 static uint32_t oaes_get_seed(void)
 {
-	struct timeb timer;
+	struct oaes_time timer;
 	struct tm *gmTimer;
 	char * _test = NULL;
 	uint32_t _ret = 0;
 	
-	ftime (&timer);
+	oaes_get_time( &timer );
 	gmTimer = gmtime( &timer.time );
 	_test = (char *) calloc( sizeof( char ), timer.millitm );
 	_ret = (uint32_t)(gmTimer->tm_year + 1900 + gmTimer->tm_mon + 1 + gmTimer->tm_mday +

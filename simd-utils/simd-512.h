@@ -107,10 +107,12 @@ typedef union
 #define v512_64(i64)    _mm512_set1_epi64(i64)
 #define v512_32(i32)    _mm512_set1_epi32(i32)
 
-// A simple 128 bit permute, using function instead of macro avoids
-// problems if the v arg passed as an expression.
-static inline __m512i mm512_perm128( const __m512i v, const int c )
-{  return _mm512_shuffle_i64x2( v, v, c ); }
+// A simple 128 bit permute. Must be a macro, not an inline function: clang
+// requires the control byte to be a compile time constant and rejects it as a
+// function parameter, which is why it could not build this header at all. The v
+// arg is therefore evaluated twice, so keep it side effect free -- the same
+// contract as every other macro here.
+#define mm512_perm128( v, c )  _mm512_shuffle_i64x2( v, v, c )
 
 // Broadcast 128 bit vector to all lanes of 512 bit vector.
 #define mm512_bcast128( v )    mm512_perm128( _mm512_castsi128_si512( v ), 0 )
