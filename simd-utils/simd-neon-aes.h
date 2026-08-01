@@ -70,10 +70,9 @@ static inline uint8x16_t v128_aes_emu_sub_bytes_table( uint8x16_t x )
 // log/antilog: an add and one 32-entry lookup each, with log(0) a 0x40 sentinel
 // that lands out of TBL range and reads as 0, so x = 0 needs no branch.
 //
-// nu = 0xb, beta = 0x12 and all nine tables are derived, not transcribed, by
-// internal-docs/harness/verus/derive_sbox_tower.py, which verifies the composed
-// sequence against the real S-box for all 256 inputs. 13 lookups against 4, but
-// 10 constant registers against 16.
+// nu = 0xb, beta = 0x12 and all nine tables are derived rather than transcribed,
+// and the composed sequence was verified against the real AES S-box over all 256
+// inputs. 13 lookups against 4, but 10 constant registers against 16.
 static inline uint8x16_t v128_aes_emu_sub_bytes_tower( uint8x16_t x )
 {
    static const uint8_t ipt_lo[16] =

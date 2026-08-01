@@ -137,6 +137,20 @@ validate the Blake2b personalization, hash generation and index packing against 
 a self-consistent encoding bug would pass local verification yet be rejected by the
 pool. End-to-end correctness is confirmed by pool-accepted shares.
 
+Those vectors are optional and supplied by file. Create `equihash-vectors.txt` in the
+working directory with one vector per line:
+
+```
+# <wn> <wk> <personalization> <header_hex> [<solution_hex>]
+200 9 ZcashPoW 0400000...<140-byte header>... fd4005...<1344-byte solution>...
+```
+
+Blank lines and `#` comments are ignored; the solution field may be omitted to check
+only hash generation and packing. The miner reports `EH selftest: N/M vectors PASSED`
+at startup, and logs the selected solver backend as `EH backend: <name>`. The optimized
+backend is additionally checked against the frozen scalar reference on every start, and
+falls back to the reference automatically if the two ever disagree.
+
 ## Possible optimizations (preview)
 
 Equihash performance is dominated by the solver's memory behaviour:

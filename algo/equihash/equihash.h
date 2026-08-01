@@ -125,7 +125,6 @@ bool equihash_verify(const uint8_t *header, const eh_params_t *p,
 /* The three hot kernels are dispatched through this vtable so an optimized
  * (SIMD/NEON) backend can replace them without touching the arch-neutral
  * orchestration, workspace, reconstruction, packing or verifier in equihash.c.
- * See docs/EQUIHASH_OPTIMIZATION_PLAN.md, item 0.
  *
  *   gen_hashes   : fill hbuf0 with Blake2b+ExpandArray hashes for all indices
  *   bucket_sort  : counting-sort hbuf0[0..n_src) into hbuf1 by collision group,

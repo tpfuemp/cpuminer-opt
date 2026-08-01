@@ -7,8 +7,6 @@
  * exactly. Keeping them `static inline` here lets each translation unit inline
  * them (important for the Wagner inner loop) while guaranteeing the reference
  * backend and the verifier stay bit-identical.
- *
- * See docs/EQUIHASH_OPTIMIZATION_PLAN.md (item 0: backend split).
  */
 #ifndef EQUIHASH_IMPL_H
 #define EQUIHASH_IMPL_H

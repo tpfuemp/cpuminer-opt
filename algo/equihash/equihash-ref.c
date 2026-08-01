@@ -4,7 +4,7 @@
  * FROZEN: this is the correctness oracle and the living documentation of the
  * algorithm. Do NOT optimize in place — add optimized kernels in
  * equihash-simd.c behind the eh_backend_t vtable and validate them against this
- * backend (see docs/EQUIHASH_OPTIMIZATION_PLAN.md, item 0).
+ * backend.
  *
  * Provides the three hot kernels dispatched by equihash_solve() in equihash.c:
  *   - gen_hashes   : Blake2b hash generation + ExpandArray into hbuf0

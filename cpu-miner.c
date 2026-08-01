@@ -78,7 +78,59 @@ uint64_t available_system_memory(void)
             freemem = (uint64_t)kb * 1024ULL;
     }
     fclose(f);
-    return avail ? avail : freemem;
+    if ( !avail ) avail = freemem;
+
+    /* ── Container awareness (LXC / Docker / k8s) ─────────────────────────
+     * /proc/meminfo reports the HOST's memory inside a container unless lxcfs
+     * (or similar) is mounted over it, so the figure above can be many times
+     * the memory this process may actually use. Take the tighter of the two by
+     * consulting the cgroup limit. Reported by a user running equihash192 in
+     * LXC: 12 threads x 3.7 GB was never capped because the host had the RAM,
+     * and the container OOMed instead.                                      */
+    {
+        static const char *lim_paths[] = {
+            "/sys/fs/cgroup/memory.max",                      /* cgroup v2 */
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",    /* cgroup v1 */
+            NULL };
+        static const char *use_paths[] = {
+            "/sys/fs/cgroup/memory.current",
+            "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+            NULL };
+
+        for ( int i = 0; lim_paths[i]; i++ )
+        {
+            FILE *lf = fopen( lim_paths[i], "r" );
+            if ( !lf ) continue;
+            char buf[64];
+            uint64_t limit = 0;
+            if ( fgets( buf, sizeof(buf), lf ) )
+            {
+                /* cgroup v2 writes the literal "max" when unlimited; v1 uses a
+                 * sentinel near UINT64_MAX. Either way: no meaningful limit.  */
+                unsigned long long v;
+                if ( sscanf( buf, "%llu", &v ) == 1 && v < (1ULL << 62) )
+                    limit = (uint64_t)v;
+            }
+            fclose( lf );
+            if ( !limit ) continue;
+
+            uint64_t used = 0;
+            FILE *uf = fopen( use_paths[i], "r" );
+            if ( uf )
+            {
+                char ubuf[64];
+                unsigned long long u;
+                if ( fgets( ubuf, sizeof(ubuf), uf )
+                     && sscanf( ubuf, "%llu", &u ) == 1 )
+                    used = (uint64_t)u;
+                fclose( uf );
+            }
+            uint64_t cg_avail = ( used < limit ) ? limit - used : 0;
+            if ( !avail || cg_avail < avail ) avail = cg_avail;
+            break;
+        }
+    }
+    return avail;
 
 #elif defined(__APPLE__)
     uint64_t page_size = (uint64_t)getpagesize();
@@ -3867,6 +3919,28 @@ int main(int argc, char *argv[])
                   opt_n_threads );
             }
          }
+      }
+   }
+   else
+   {
+      /* -t was given explicitly, so the cap above is deliberately skipped.
+       * Still warn if the request cannot fit — silently reserving more than
+       * RAM looks exactly like a memory leak to the user (equihash192 at
+       * 3.6 GB/thread x 12 = 44 GB), and inside a container it ends in an
+       * OOM kill rather than an allocation failure.                        */
+      size_t ws = algo_gate.get_workspace_size();
+      if ( ws > 0 )
+      {
+         uint64_t avail = available_system_memory();
+         uint64_t need  = (uint64_t)ws * (uint64_t)opt_n_threads;
+         if ( avail > 0 && need > avail )
+            applog( LOG_WARNING,
+               "-t %d requests %.1f GB (%.0f MB/thread) but only %.1f GB is "
+               "available — expect heavy swapping or an OOM kill. This is a "
+               "reservation, not a leak: RSS climbs until every thread's "
+               "workspace is touched. Drop -t to let it auto-cap.",
+               opt_n_threads, need / (1024.0*1024.0*1024.0),
+               ws / (1024.0*1024.0), avail / (1024.0*1024.0*1024.0) );
       }
    }
 

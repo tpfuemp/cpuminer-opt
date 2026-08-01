@@ -546,8 +546,9 @@ static void eh_run_selftests_once(void)
     eh_load_vectors_file(EH_VECTORS_FILE, &nrun, &npass);
 
     if (nrun == 0)
-        applog(LOG_BLUE, "EH selftest: no vectors found (create %s with a known "
-               "block to validate the verifier — see EQUIHASH_IMPLEMENTATION_PLAN.md)",
+        applog(LOG_BLUE, "EH selftest: no vectors found (optional: create %s, one "
+               "vector per line as \"<wn> <wk> <personalization> <header_hex> "
+               "[<solution_hex>]\", to validate the verifier against a known block)",
                EH_VECTORS_FILE);
     else
         applog(npass == nrun ? LOG_NOTICE : LOG_ERR,

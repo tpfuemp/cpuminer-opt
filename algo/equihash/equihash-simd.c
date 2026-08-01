@@ -4,7 +4,6 @@
  * Validated against the frozen scalar reference (equihash-ref.c) via the
  * differential oracle eh_backend_selftest() — if a kernel here ever diverges,
  * eh_active_backend() falls back to the reference automatically.
- * See docs/EQUIHASH_OPTIMIZATION_PLAN.md.
  *
  * ── Item 1: Blake2b midstate ──────────────────────────────────────────────
  * The Blake2b input is header[140] || LE32(blk) = one full 128-byte block
@@ -238,8 +237,8 @@ static void simd_bucket_sort(uint32_t n_src, eh_workspace_t *ws)
 }
 
 /* ── Wagner round (fused merge) ────────────────────────────────────────────
- * Profiling (docs/EQUIHASH_OPTIMIZATION_PLAN.md, "Where the time goes" — updated)
- * shows wagner_round is 58-73% of every solve once hash-gen is optimized. The
+ * Profiling shows wagner_round is 58-73% of every solve once hash-gen is
+ * optimized (96/5 58.9%, 200/9 73.2%, 144/5 58.4% on an i7-11700F). The
  * reference merge does four passes over a slot per emitted pair:
  *     memcpy(dst, si, slot_bytes); xor_hash(dst, sj); shift_hash(dst); set_min
  * But the two parents collided, so their leading cbl bytes are equal and XOR to

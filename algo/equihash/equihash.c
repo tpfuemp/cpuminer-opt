@@ -6,7 +6,7 @@
  * dispatched through the eh_backend_t vtable so an optimized SIMD backend can
  * replace them without touching this file. The scalar reference backend lives
  * in equihash-ref.c (the correctness oracle); shared byte-layout primitives are
- * in equihash-impl.h. See docs/EQUIHASH_OPTIMIZATION_PLAN.md, item 0.
+ * in equihash-impl.h.
  *
  * Algorithm: Wagner's Generalised Birthday Problem.
  * Reference:  Zcash src/crypto/equihash.cpp (BasicSolve / IsValidSolution).
