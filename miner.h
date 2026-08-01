@@ -633,7 +633,8 @@ enum algos {
         ALGO_ARGON2D1000,
         ALGO_ARGON2D16000,
         ALGO_ARGON2D4096,
-        ALGO_AXIOM,       
+        ALGO_ARGON2ID1024,
+        ALGO_AXIOM,
         ALGO_BLAKE,       
         ALGO_BLAKE2B,
         ALGO_BLAKE2S,     
@@ -742,6 +743,7 @@ static const char* const algo_names[] = {
         "argon2d1000",
         "argon2d16000",
         "argon2d4096",
+        "argon2id1024",
         "axiom",
         "blake",
         "blake2b",
@@ -916,6 +918,7 @@ Options:\n\
                           argon2d1000\n\
                           argon2d16000\n\
                           argon2d4096\n\
+                          argon2id1024  Bitweb (WEB)\n\
                           axiom         Shabal-256 MemoHash\n\
                           blake         blake256r14 (SFR)\n\
                           blake2b       Blake2b 256\n\

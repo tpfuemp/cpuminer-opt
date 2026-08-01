@@ -21,6 +21,7 @@ bool register_argon2d500_algo( algo_gate_t *gate );
 bool register_argon2d1000_algo( algo_gate_t *gate );
 bool register_argon2d16000_algo( algo_gate_t *gate );
 bool register_argon2d4096_algo( algo_gate_t *gate );
+bool register_argon2id1024_algo( algo_gate_t *gate );
 bool register_axiom_algo( algo_gate_t *gate );
 bool register_blake_algo( algo_gate_t *gate );
 bool register_blake2b_algo( algo_gate_t *gate );

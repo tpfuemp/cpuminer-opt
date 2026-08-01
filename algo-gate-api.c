@@ -299,6 +299,7 @@ bool register_algo_gate( int algo, algo_gate_t *gate )
     case ALGO_ARGON2D1000:  rc = register_argon2d1000_algo   ( gate ); break;
     case ALGO_ARGON2D16000: rc = register_argon2d16000_algo  ( gate ); break;
     case ALGO_ARGON2D4096:  rc = register_argon2d4096_algo   ( gate ); break;
+case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_AXIOM:        rc = register_axiom_algo         ( gate ); break;
     case ALGO_BLAKE:        rc = register_blake_algo         ( gate ); break;
     case ALGO_BLAKE2B:      rc = register_blake2b_algo       ( gate ); break;
@@ -432,6 +433,7 @@ const char* const algo_alias_map[][2] =
   { "blake256r8",        "blakecoin"      },
   { "blake256r8vnl",     "vanilla"        },
   { "blake256r14",       "blake"          },
+  { "bitweb",            "argon2id1024"   },
   { "diamond",           "dmd-gr"         },
   { "espers",            "hmq1725"        },
   { "flax",              "c11"            },

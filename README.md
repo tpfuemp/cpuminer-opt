@@ -61,6 +61,7 @@ Supported Algorithms
                           argon2d500
                           argon2d1000
                           argon2d4096
+                          argon2id1024  Bitweb (WEB)
                           blake         Blake-256
                           blake2b       Blake2-512
                           blake2s       Blake2-256
