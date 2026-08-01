@@ -429,11 +429,11 @@ const char* const algo_alias_map[][2] =
 //   alias                proper
   { "bcd",               "x13bcd"         },
   { "bitcore",           "timetravel10"   },
+  { "bitweb",            "argon2id1024"   },
   { "bitzeny",           "yescryptr8"     },
   { "blake256r8",        "blakecoin"      },
   { "blake256r8vnl",     "vanilla"        },
   { "blake256r14",       "blake"          },
-  { "bitweb",            "argon2id1024"   },
   { "diamond",           "dmd-gr"         },
   { "espers",            "hmq1725"        },
   { "flax",              "c11"            },
