@@ -26,8 +26,6 @@
 #include "verus-simd.h"   /* immintrin.h on x86, verus-neon.h on aarch64 */
 #ifdef _WIN32
 #include <intrin.h>
-#elif defined(__x86_64__) || defined(__i386__)
-#include <cpuid.h>    /* only for the unused IsCPUVerusOptimized() helper */
 #endif
 
 
@@ -45,107 +43,27 @@ extern "C" {
 #ifdef _WIN32
 #define posix_memalign(p, a, s) (((*(p)) = _aligned_malloc((s), (a))), *(p) ?0 :errno)
 
-	typedef unsigned char u_char;
-
-typedef unsigned char u_char;
-
 #endif
 #include "haraka.h"
 #include "haraka_portable.h"
-enum {
-    // Verus Key size must include the equivalent size of a Haraka key
-    // after the first part.
-    // Any excess over a power of 2 will not get mutated, and any excess over
-    // power of 2 + Haraka sized key will not be used
-	VERUSKEYSIZE = 1024 * 8 + (40 * 16),
-	VERUSHHASH_SOLUTION_VERSION = 1
-};
 
 
-
-extern int __cpuverusoptimized;
-
-#ifndef ARM
-inline bool IsCPUVerusOptimized()
-{
-
-#ifndef _WIN32
-	unsigned int eax, ebx, ecx, edx;
-
-	if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx))
-	{
-		return false;
-	}
-	return ((ecx & (bit_AVX | bit_AES)) == (bit_AVX | bit_AES));
-#else
-
-	// https://github.com/gcc-mirror/gcc/blob/master/gcc/config/i386/cpuid.h
-#define bit_AVX		(1 << 28)
-#define bit_AES		(1 << 25)
-	// https://insufficientlycomplicated.wordpress.com/2011/11/07/detecting-intel-advanced-vector-extensions-avx-in-visual-studio/
-	// bool cpuAVXSuport = cpuInfo[2] & (1 << 28) || false;
-
-	int cpuInfo[4];
-	__cpuid(cpuInfo, 1);
-	return ((cpuInfo[2] & (bit_AVX | bit_AES)) == (bit_AVX | bit_AES));
-
-#endif
-
-
-    if (__cpuverusoptimized & 0x80)
-    {
-#ifdef _WIN32
-        #define bit_AVX		(1 << 28)
-        #define bit_AES		(1 << 25)
-        #define bit_PCLMUL  (1 << 1)
-        // https://insufficientlycomplicated.wordpress.com/2011/11/07/detecting-intel-advanced-vector-extensions-avx-in-visual-studio/
-        // bool cpuAVXSuport = cpuInfo[2] & (1 << 28) || false;
-
-        int cpuInfo[4];
-		__cpuid(cpuInfo, 1);
-        __cpuverusoptimized = ((cpuInfo[2] & (bit_AVX | bit_AES | bit_PCLMUL)) == (bit_AVX | bit_AES | bit_PCLMUL));
-#else
-        unsigned int eax,ebx,ecx,edx;
-
-        if (!__get_cpuid(1,&eax,&ebx,&ecx,&edx))
-        {
-            __cpuverusoptimized = false;
-        }
-        else
-        {
-            __cpuverusoptimized = ((ecx & (bit_AVX | bit_AES | bit_PCLMUL)) == (bit_AVX | bit_AES | bit_PCLMUL));
-        }
-#endif //WIN32
-    }
-    return __cpuverusoptimized;
-
-};
-
-#endif // !ARM
-
-inline void ForceCPUVerusOptimized(bool trueorfalse)
-{
-    __cpuverusoptimized = trueorfalse;
-};
-
-uint64_t verusclhashv2_1(void * random, const unsigned char buf[64], uint64_t keyMask, uint32_t *fixrand, uint32_t *fixrandex,
-	u128 *g_prand, u128 *g_prandex);
 uint64_t verusclhashv2_2(void * random, const unsigned char buf[64], uint64_t keyMask, uint32_t *fixrand, uint32_t *fixrandex,
 	u128 *g_prand, u128 *g_prandex);
-uint64_t verusclhash_port(void * random, const unsigned char buf[64], uint64_t keyMask, uint32_t *fixrand, uint32_t *fixrandex,
-	u128 *g_prand, u128 *g_prandex);
+
+/* in verus_clhash.c; declared for verus_clhash_2way.c */
+__m128i  lazyLengthHash(uint64_t keylength, uint64_t length);
+uint64_t precompReduction64(__m128i A);
+
+/* two nonces interleaved; each lane needs its own mutable key and journal */
+void verusclhash_2way(void *random0, const unsigned char buf0[64],
+	void *random1, const unsigned char buf1[64], uint64_t keymask,
+	uint32_t *fixrand0, uint32_t *fixrandex0, u128 *g_prand0, u128 *g_prandex0,
+	uint32_t *fixrand1, uint32_t *fixrandex1, u128 *g_prand1, u128 *g_prandex1,
+	uint64_t out[2]);
 
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
-#ifdef __cplusplus
-
-#include <vector>
-#include <string>
-
-// special high speed hasher for VerusHash 2.0
-
-#endif // #ifdef __cplusplus
 
 #endif // INCLUDE_VERUS_CLHASH_H

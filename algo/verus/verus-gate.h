@@ -33,6 +33,12 @@
 
 #define VERUS_SOLUTION_FIXED 1344  /* VRSC SOLUTION_SIZE (SOLUTION_SIZE_FIXED) */
 
+/* opt_target_factor: Verus reports difficulty against powLimit = 2^256/17 while
+ * nbits_to_diff() uses Bitcoin's diff-1, so every displayed diff is short by the
+ * ratio of the two. Display only -- the share target comes verbatim from
+ * mining.set_target. Calibration against block 4174000: docs/algorithms/verus.md. */
+#define VRS_DIFF_SCALE  ( 281474976710656.0 / ( 17.0 * 65535.0 ) )  /* 2^48/(17*0xffff) */
+
 /* The pool sends only descriptor + PBaaS headers + extra data (281 bytes on
  * pool.verus.io) and the miner zero-pads it. Two things pin the padded size:
  *

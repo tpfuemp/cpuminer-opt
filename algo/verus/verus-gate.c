@@ -36,8 +36,30 @@
 // thread-local and persistent, and the prologue re-runs only when the
 // job-constant first 1472 bytes of the preimage actually change.
 // ---------------------------------------------------------------------------
+/* Nonces hashed at once. Interleaving two lanes' clhash fills one lane's stalls
+ * with the other's work: whole miner, all cores busy, A76 cluster +15.0%, A55
+ * +0.1%, x86 -t 16 -7.6% (SMT already fills them) -- hence aarch64 only.
+ * ⚠️ Measure it loaded, never per core: isolated it reads A76 -7% and A55 +7%
+ * *worse*. FORCE_* first, so both paths stay testable in every build (V-08). */
+#if defined(FORCE_VERUS_2WAY)
+#define VRS_LANES 2
+#define VRS_LANES_DESC "2 nonces interleaved (forced by FORCE_VERUS_2WAY)"
+#elif defined(FORCE_VERUS_1WAY)
+#define VRS_LANES 1
+#define VRS_LANES_DESC "1 nonce (forced by FORCE_VERUS_1WAY)"
+#elif !defined(__aarch64__)
+#define VRS_LANES 1
+#define VRS_LANES_DESC "1 nonce (x86: SMT already supplies this parallelism)"
+#else
+#define VRS_LANES 2
+#define VRS_LANES_DESC "2 nonces interleaved (aarch64 default)"
+#endif
+
 typedef struct {
    u128     key[VERUS_KEY_SIZE128 + VERUS_SCRATCH_U128];  /* 616 u128 = 9856 B */
+#if VRS_LANES == 2
+   u128     key2[VERUS_KEY_SIZE128 + VERUS_SCRATCH_U128]; /* lane 1's own copy  */
+#endif
    uint8_t  half[64];                  /* VerusHashHalf output (state+15+pad)  */
    uint8_t  prefix[VERUS_PREIMAGE_MAX];/* cache tag: the job-constant bytes    */
    int      prefix_len;
@@ -143,48 +165,82 @@ static void VerusHashHalf( void *result2, unsigned char *data, int len )
    memcpy( result2, curBuf, 64 );
 }
 
-/* One nonce. `curBuf` is a scratch copy of the 64-byte half state; `hash`
- * receives only bytes 28..31 (see verushash_full for the whole digest). */
+/* Per nonce, before the clhash: only the 15 nonce bytes. Upstream also re-derives
+ * curBuf[47..63] here, which is dead work while curBuf is a fresh copy of
+ * ctx->half -- VerusHashHalf's FillExtra already wrote those exact bytes. (It
+ * exists upstream because fill2 clobbers them, so a reused buffer needs it.) */
+static inline void verus_set_nonce( unsigned char *curBuf, unsigned char *nonce )
+{
+   memcpy( curBuf + 32, nonce, VERUS_NONCE_SPACE );
+}
+
+/* Round constants come from the MUTATED key at a data-dependent offset -- what
+ * makes VerusHash 2.x hostile to fixed-function hardware. haraka512_keyed is
+ * truncated to out[28..31], enough for the target test and the reference's main
+ * per-nonce saving; candidates re-do it in software to get all 32 bytes. `full`
+ * is literal at every call site, so this folds. */
+static inline void verus_keyed_haraka( unsigned char *hash, unsigned char *curBuf,
+                                       uint64_t intermediate, u128 *data_key,
+                                       const bool full )
+{
+   const __m128i shuf2 = _mm_setr_epi8( 1,2,3,4,5,6,7,0,1,2,3,4,5,6,7,0 );
+   const __m128i fill2 =
+      _mm_shuffle_epi8( _mm_loadl_epi64( (u128*)&intermediate ), shuf2 );
+   _mm_store_si128( (u128*)( &curBuf[32 + 16] ), fill2 );
+   curBuf[32 + 15] = *( (unsigned char*)&intermediate );
+
+   if ( full )
+      haraka512_port_keyed( hash, curBuf, data_key + ( intermediate & 511 ) );
+   else
+      haraka512_keyed( hash, curBuf, data_key + ( intermediate & 511 ) );
+}
+
+/* One nonce; `hash` receives only bytes 28..31 unless `full`. */
 static inline void Verus2hash( unsigned char *hash, unsigned char *curBuf,
                                unsigned char *nonce, u128 *data_key,
                                uint32_t *fixrand, uint32_t *fixrandex,
                                u128 *g_prand, u128 *g_prandex,
                                const bool full )
 {
-   /* not `static const` as upstream has it: _mm_setr_epi8 is not a constant
-    * initializer in C (it is in C++), and this file is C. GCC materialises
-    * these as constants anyway. */
-   const __m128i shuf1 = _mm_setr_epi8( 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,0 );
-   const __m128i shuf2 = _mm_setr_epi8( 1,2,3,4,5,6,7,0,1,2,3,4,5,6,7,0 );
-
-   const __m128i fill1 = _mm_shuffle_epi8( _mm_load_si128( (u128*)curBuf ), shuf1 );
-   const unsigned char ch = curBuf[0];
-   _mm_store_si128( (u128*)( &curBuf[32 + 16] ), fill1 );
-   curBuf[32 + 15] = ch;
-
-   memcpy( curBuf + 32, nonce, VERUS_NONCE_SPACE );
+   verus_set_nonce( curBuf, nonce );
 
    uint64_t intermediate = verusclhashv2_2( data_key, curBuf, 511,
                                             fixrand, fixrandex,
                                             g_prand, g_prandex );
 
-   const __m128i fill2 =
-      _mm_shuffle_epi8( _mm_loadl_epi64( (u128*)&intermediate ), shuf2 );
-   _mm_store_si128( (u128*)( &curBuf[32 + 16] ), fill2 );
-   curBuf[32 + 15] = *( (unsigned char*)&intermediate );
-
-   /* Round constants come from the MUTATED key at a data-dependent offset --
-    * what makes VerusHash 2.x hostile to fixed-function hardware.
-    * haraka512_keyed is truncated to out[28..31], enough for the target test and
-    * the reference's main per-nonce saving; candidates re-do it in software to
-    * get all 32 bytes. `full` is literal at both call sites, so this folds. */
-   if ( full )
-      haraka512_port_keyed( hash, curBuf, data_key + ( intermediate & 511 ) );
-   else
-      haraka512_keyed( hash, curBuf, data_key + ( intermediate & 511 ) );
-
+   verus_keyed_haraka( hash, curBuf, intermediate, data_key, full );
    FixKey( fixrand, fixrandex, data_key, g_prand, g_prandex );
 }
+
+#if VRS_LANES == 2
+/* Two nonces. Only the clhash interleaves: the keyed Haraka needs its own lane's
+ * result, and with FixKey it is ~10% of a hash. Each lane needs its own mutable
+ * key -- the algorithm mutates the key as it reads it. */
+static inline void Verus2hash_2way( unsigned char *hash0, unsigned char *hash1,
+                                    unsigned char *curBuf0, unsigned char *curBuf1,
+                                    unsigned char *nonce0, unsigned char *nonce1,
+                                    u128 *key0, u128 *key1,
+                                    uint32_t *fixrand0, uint32_t *fixrandex0,
+                                    u128 *g_prand0, u128 *g_prandex0,
+                                    uint32_t *fixrand1, uint32_t *fixrandex1,
+                                    u128 *g_prand1, u128 *g_prandex1 )
+{
+   uint64_t intermediate[2];
+
+   verus_set_nonce( curBuf0, nonce0 );
+   verus_set_nonce( curBuf1, nonce1 );
+
+   verusclhash_2way( key0, curBuf0, key1, curBuf1, 511,
+                     fixrand0, fixrandex0, g_prand0, g_prandex0,
+                     fixrand1, fixrandex1, g_prand1, g_prandex1, intermediate );
+
+   verus_keyed_haraka( hash0, curBuf0, intermediate[0], key0, false );
+   verus_keyed_haraka( hash1, curBuf1, intermediate[1], key1, false );
+
+   FixKey( fixrand0, fixrandex0, key0, g_prand0, g_prandex0 );
+   FixKey( fixrand1, fixrandex1, key1, g_prand1, g_prandex1 );
+}
+#endif  /* VRS_LANES == 2 */
 
 // ---------------------------------------------------------------------------
 // Full 1487-byte-preimage hash (gate->hash; also the self-test entry).
@@ -448,6 +504,66 @@ bool verus_self_test( void )
    return true;
 }
 
+/* the 4 nonce bytes the miner varies, inside the 15-byte solution nonce space */
+static inline void verus_put_nonce( uint8_t *nonceSpace, uint32_t n )
+{
+   nonceSpace[11] = (uint8_t)( n       ); nonceSpace[12] = (uint8_t)( n >>  8 );
+   nonceSpace[13] = (uint8_t)( n >> 16 ); nonceSpace[14] = (uint8_t)( n >> 24 );
+}
+
+/* bundled so both hashing loops share one copy of the submit logic */
+typedef struct {
+   struct work     *work;
+   uint8_t         *full;
+   uint32_t        *ptarget;
+   struct thr_info *mythr;
+   verus_ctx_t     *ctx;
+   int              half_len, pre_len, sol_size;
+   uint32_t         targ32;
+   bool             pbaas, bench;
+} verus_cand_t;
+
+/* Only hash[28..31] is written by the truncated keyed Haraka, so this is the
+ * whole target test the reference does. A candidate is re-hashed in full so the
+ * submitted digest and the share-diff stats are real. Returns true if that
+ * re-hash ran, because it regenerates ctx->key. */
+static bool verus_check_candidate( verus_cand_t *C, const uint8_t *hash,
+                                   const uint8_t *nonceSpace, uint32_t n )
+{
+   if ( likely( ((const uint32_t*)hash)[7] > C->targ32 || C->bench ) )
+      return false;
+
+   uint32_t *pdata = C->work->data;
+   uint8_t _ALIGN(64) fullhash[32];
+
+   memcpy( C->full + C->half_len, nonceSpace, VERUS_NONCE_SPACE );
+   verushash_full( fullhash, C->full, C->pre_len );
+   C->ctx->valid = false;            /* verushash_full clobbered the cache */
+
+   if ( valid_hash( (uint32_t*)fullhash, C->ptarget ) )
+   {
+      /* the pool needs the 15 nonce bytes inside the solution it gets back */
+      memcpy( C->work->equihash_solution + C->sol_size - VERUS_NONCE_SPACE,
+              nonceSpace, VERUS_NONCE_SPACE );
+
+      /* Submit the header exactly as hashed: in PBaaS mode a zeroed nNonce, as
+       * upstream sends, the pool taking the real nonce from the solution tail.
+       * Pools reject a non-zero one. Restore after -- nNonce also holds
+       * extranonce1 and the framework's range counter, and submit_work
+       * deep-copies before returning. */
+      uint32_t saved[8];
+      memcpy( saved, pdata + 27, sizeof saved );
+      if ( C->pbaas ) memset( pdata + 27, 0, sizeof saved );
+      else            pdata[ VRS_NONCE_INDEX ] = n;
+
+      submit_solution( C->work, fullhash, C->mythr );
+
+      memcpy( pdata + 27, saved, sizeof saved );
+      pdata[ VRS_NONCE_INDEX ] = n;
+   }
+   return true;
+}
+
 // ---------------------------------------------------------------------------
 // scanhash
 //
@@ -551,52 +667,67 @@ int scanhash_verus( struct work *work, uint32_t max_nonce,
    u128 *g_prandex = ctx->key + VERUS_KEY_SIZE128 + 32;
    uint32_t n = first_nonce;
 
-   do
+   verus_cand_t cand = { .work = work, .full = full, .ptarget = ptarget,
+                         .mythr = mythr, .ctx = ctx, .half_len = half_len,
+                         .pre_len = pre_len, .sol_size = sol_size,
+                         .targ32 = targ32, .pbaas = pbaas, .bench = bench };
+
+#if VRS_LANES == 2
+   {
+      /* Lane 1 works on its own key copy; each lane's FixKey restores its own.
+       * Re-copied per call rather than per job because the candidate path
+       * regenerates ctx->key -- 9856 B is ~1 us against ms of hashing. */
+      uint32_t fixrand2[32], fixrandex2[32];
+      u128 *g_prand2   = ctx->key2 + VERUS_KEY_SIZE128;
+      u128 *g_prandex2 = ctx->key2 + VERUS_KEY_SIZE128 + 32;
+      uint8_t nonceSpace2[VERUS_NONCE_SPACE];
+
+      memcpy( ctx->key2, ctx->key, sizeof ctx->key );
+      memcpy( nonceSpace2, nonceSpace, VERUS_NONCE_SPACE );
+
+      while ( n + 1 < max_nonce && !(*restart) )
+      {
+         uint8_t _ALIGN(32) curBuf[64], curBuf2[64];
+         /* only [28..31] is written and read; the zeroing is 3 insns/nonce GCC does
+          * not elide, kept so a future reader of [0..27] gets zeros not garbage */
+         uint8_t hash[32] = {0}, hash2[32] = {0};
+
+         memcpy( curBuf,  ctx->half, 64 );
+         memcpy( curBuf2, ctx->half, 64 );
+         verus_put_nonce( nonceSpace,  n     );
+         verus_put_nonce( nonceSpace2, n + 1 );
+
+         Verus2hash_2way( hash, hash2, curBuf, curBuf2, nonceSpace, nonceSpace2,
+                          ctx->key, ctx->key2,
+                          fixrand, fixrandex, g_prand, g_prandex,
+                          fixrand2, fixrandex2, g_prand2, g_prandex2 );
+
+         /* both lanes always checked -- not `||`, which would skip lane 1 */
+         const bool re0 = verus_check_candidate( &cand, hash,  nonceSpace,  n     );
+         const bool re1 = verus_check_candidate( &cand, hash2, nonceSpace2, n + 1 );
+         if ( re0 || re1 )
+            memcpy( ctx->key2, ctx->key, sizeof ctx->key );  /* key regenerated */
+         n += 2;
+      }
+   }
+#endif
+
+   /* The 1-way path: the whole range in a 1-lane build, or the odd tail nonce
+    * after the loop above. */
+   while ( n < max_nonce && !(*restart) )
    {
       uint8_t _ALIGN(32) curBuf[64];
       uint8_t hash[32] = {0};
 
       memcpy( curBuf, ctx->half, 64 );
-      nonceSpace[11] = (uint8_t)( n       ); nonceSpace[12] = (uint8_t)( n >>  8 );
-      nonceSpace[13] = (uint8_t)( n >> 16 ); nonceSpace[14] = (uint8_t)( n >> 24 );
+      verus_put_nonce( nonceSpace, n );
 
       Verus2hash( hash, curBuf, nonceSpace, ctx->key,
                   fixrand, fixrandex, g_prand, g_prandex, false );
 
-      /* Only hash[28..31] is written by the truncated keyed Haraka, so this is
-       * the whole target test the reference does. A candidate is re-hashed in
-       * full below so the submitted digest and the share-diff stats are real. */
-      if ( unlikely( ((uint32_t*)hash)[7] <= targ32 && !bench ) )
-      {
-         uint8_t _ALIGN(64) fullhash[32];
-         memcpy( full + half_len, nonceSpace, VERUS_NONCE_SPACE );
-         verushash_full( fullhash, full, pre_len );
-         ctx->valid = false;      /* verushash_full clobbered the cache */
-
-         if ( valid_hash( (uint32_t*)fullhash, ptarget ) )
-         {
-            /* the pool needs the 15 nonce bytes inside the solution it gets back */
-            memcpy( work->equihash_solution + sol_size - VERUS_NONCE_SPACE,
-                    nonceSpace, VERUS_NONCE_SPACE );
-
-            /* Submit the header exactly as hashed: in PBaaS mode a zeroed
-             * nNonce, as upstream sends, the pool taking the real nonce from
-             * the solution tail. Pools reject a non-zero one. Restore after --
-             * nNonce also holds extranonce1 and the framework's range counter,
-             * and submit_work deep-copies before returning. */
-            uint32_t saved[8];
-            memcpy( saved, pdata + 27, sizeof saved );
-            if ( pbaas ) memset( pdata + 27, 0, sizeof saved );
-            else         pdata[ VRS_NONCE_INDEX ] = n;
-
-            submit_solution( work, fullhash, mythr );
-
-            memcpy( pdata + 27, saved, sizeof saved );
-            pdata[ VRS_NONCE_INDEX ] = n;
-         }
-      }
+      verus_check_candidate( &cand, hash, nonceSpace, n );
       n++;
-   } while ( n < max_nonce && !(*restart) );
+   }
 
    pdata[ VRS_NONCE_INDEX ] = n;
    *hashes_done = n - first_nonce;
@@ -641,6 +772,11 @@ bool register_verus_algo( algo_gate_t *gate )
 #endif
          );
 #endif
+   /* compile-time, but without this a 1-nonce and a 2-nonce binary are
+    * indistinguishable in a log. applog does not gate LOG_DEBUG itself here. */
+   if ( opt_debug )
+      applog( LOG_DEBUG, "VerusHash: clhash path %s", VRS_LANES_DESC );
+
    if ( !verus_self_test() )
    {
       applog( LOG_ERR, "VerusHash self-test failed" );
@@ -662,15 +798,7 @@ bool register_verus_algo( algo_gate_t *gate )
    gate->nbits_index   = VRS_NBITS_INDEX;
    gate->nonce_index   = VRS_NONCE_INDEX;
    gate->work_cmp_size = VRS_WORK_CMP_SIZE;
-   /* Verus's target arrives as the exact 32 bytes via mining.set_target and is
-    * used verbatim (stratum_gen_work), so opt_target_factor does NOT affect
-    * share validity here -- only the difficulty numbers in the log and API.
-    * Verus's own convention uses a 0x0f0f0f numerator rather than ZCash's
-    * 0xffff0000, so the displayed diff will read in internal (diff1 = 2^32)
-    * units until this is calibrated against a live pool's reported share diff.
-    * Deliberately not derived on paper: the same algebra fails to reproduce the
-    * pool-validated EQH_DIFF_SCALE, so it needs one measurement, not a guess. */
-   opt_target_factor   = 1.0;
+   opt_target_factor   = VRS_DIFF_SCALE;   /* displayed diffs only */
    return true;
 #endif
 }
