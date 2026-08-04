@@ -21,10 +21,10 @@
  *   slot[hash_length .. hash_length+3]: min leaf index (LE uint32)
  *   slot_bytes = hash_length + 4
  *
- * WORKSPACE LAYOUT
- *   hbuf0/hbuf1[nhashes_init][slot_bytes] : two alternating hash buffers
- *   pairs[wk][pairs_per_round][2]         : parent-index pairs (reconstruction)
- *   sort_orig[nhashes_init]               : bucket-sort position -> source map
+ * WORKSPACE LAYOUT   (max_rows = nhashes_init + EH_ROW_SLACK_PCT%, see equihash.h)
+ *   hbuf0/hbuf1[max_rows][slot_bytes]     : two alternating hash buffers
+ *   pairs[wk][max_rows][2]                : parent-index pairs (reconstruction)
+ *   sort_orig[max_rows]                   : bucket-sort position -> source map
  *   bucket_start[nbuckets+1] / bucket_size[nbuckets]
  */
 
@@ -62,7 +62,10 @@ static eh_params_t build_params(int wn, int wk, const char *prefix)
     p.collision_bits  = wn / (wk + 1);
     p.proofsize       = 1 << wk;
     p.nhashes_init    = 1 << (p.collision_bits + 1);
-    p.pairs_per_round = p.nhashes_init;
+    /* Row capacity, not the initial list size: a round may legitimately produce
+     * more rows than it consumed, and clipping that costs solutions. */
+    p.max_rows        = p.nhashes_init
+                      + (int)((int64_t)p.nhashes_init * EH_ROW_SLACK_PCT / 100);
     /* CollisionByteLength = ceil(CollisionBitLength / 8) */
     p.cbl             = (p.collision_bits + 7) / 8;
     /* HashLength = (K+1) * CollisionByteLength  (expanded format) */
@@ -120,7 +123,7 @@ bool eh_params_from_stratum(eh_params_t *out, const char *wn_wk_str,
 /* ── Workspace ───────────────────────────────────────────────────── */
 
 /* ── Huge-page-backed flat buffer (item 3) ─────────────────────────────────
- * The workspace is one flat buffer of 7 MB – 5.8 GB. With 4 KB pages the big
+ * The workspace is one flat buffer of 11 MB – 6.4 GB. With 4 KB pages the big
  * variants need ~1M page entries, so bucket_sort's scatter thrashes the dTLB.
  * Back the buffer with 2 MB pages where the OS allows it, recording the
  * allocator so the free path matches. Fallback chain:
@@ -213,9 +216,9 @@ static void eh_huge_free(void *base, int kind, size_t size)
 
 size_t eh_workspace_bytes(const eh_params_t *p)
 {
-    size_t h  = (size_t)p->nhashes_init * p->slot_bytes;
-    size_t pr = (size_t)p->wk * p->pairs_per_round * 8;
-    size_t so = (size_t)p->nhashes_init * 4;
+    size_t h  = (size_t)p->max_rows * p->slot_bytes;
+    size_t pr = (size_t)p->wk * p->max_rows * 8;
+    size_t so = (size_t)p->max_rows * 4;
     size_t bs = (size_t)(p->nbuckets + 1) * 4;
     size_t bz = (size_t)p->nbuckets * 4;
     return 2*h + pr + so + bs + bz + 256;
@@ -256,13 +259,13 @@ bool eh_workspace_alloc(eh_workspace_t **ws_ptr, const eh_params_t *p)
     }
 
     uint8_t *cur = base;
-    size_t sh = (size_t)p->nhashes_init * p->slot_bytes;
+    size_t sh = (size_t)p->max_rows * p->slot_bytes;
     ws->hbuf0         = cur;  cur += sh;
     ws->hbuf1         = cur;  cur += sh;
     ws->pairs         = (uint32_t *)cur;
-    cur += (size_t)p->wk * p->pairs_per_round * 8;
+    cur += (size_t)p->wk * p->max_rows * 8;
     ws->sort_orig     = (uint32_t *)cur;
-    cur += (size_t)p->nhashes_init * 4;
+    cur += (size_t)p->max_rows * 4;
     ws->bucket_start  = (uint32_t *)cur;
     cur += (size_t)(p->nbuckets + 1) * 4;
     ws->bucket_size   = (uint32_t *)cur;
@@ -296,7 +299,7 @@ static uint32_t eh_run_rounds(const uint8_t *header, eh_workspace_t *ws,
     for (int r = 0; r < p->wk; r++) {
         be->bucket_sort(ws->round_cnt[r], ws);
         ws->round_cnt[r + 1] =
-            be->wagner_round(r, ws->round_cnt[r], p->pairs_per_round, ws);
+            be->wagner_round(r, ws->round_cnt[r], p->max_rows, ws);
     }
     return ws->round_cnt[p->wk];
 }
@@ -340,8 +343,8 @@ bool eh_backend_selftest(void)
             ok = (wa->round_cnt[r] == wb->round_cnt[r]);
         for (int r = 0; r < p->wk && ok; r++) {
             size_t cnt = (size_t)wa->round_cnt[r + 1] * 2;     /* uint32 pair entries */
-            const uint32_t *pa = wa->pairs + (size_t)r * p->pairs_per_round * 2;
-            const uint32_t *pb = wb->pairs + (size_t)r * p->pairs_per_round * 2;
+            const uint32_t *pa = wa->pairs + (size_t)r * p->max_rows * 2;
+            const uint32_t *pb = wb->pairs + (size_t)r * p->max_rows * 2;
             ok = (memcmp(pa, pb, cnt * 4) == 0);
         }
         if (ok && fa)
@@ -381,7 +384,7 @@ static void collect_indices(int round, uint32_t slot,
 {
     if (round < 0) { out[(*pos)++] = slot; return; }
     const uint32_t *pr = ws->pairs +
-        ((size_t)round * ws->params.pairs_per_round + slot) * 2;
+        ((size_t)round * ws->params.max_rows + slot) * 2;
     collect_indices(round - 1, pr[0], ws, out, pos);
     collect_indices(round - 1, pr[1], ws, out, pos);
 }

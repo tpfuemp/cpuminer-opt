@@ -15,7 +15,7 @@ typedef struct {
     int     hash_length;      /* HashLength = (wk+1)*cbl  (expanded format)  */
     int     proofsize;        /* 2^wk  (indices per solution)                */
     int     nhashes_init;     /* 2^(collision_bits+1)  (initial list)        */
-    int     pairs_per_round;  /* nhashes_init (one full round of pairs)      */
+    int     max_rows;         /* row capacity: nhashes_init + EH_ROW_SLACK%  */
     int     hashlen;          /* ceil(wn/8) raw bytes per Blake2b hash value */
     int     slot_bytes;       /* hash_length + 4 (hash + min_idx LE32)       */
     int     nbuckets;         /* min(1<<collision_bits, 1<<20)               */
@@ -24,14 +24,28 @@ typedef struct {
     uint8_t personalization[16]; /* "PersonStr" || LE32(wn) || LE32(wk)     */
 } eh_params_t;
 
-/* Workspace size estimates (slot_bytes = hash_length + 4, pairs = nhashes_init):
+/* Row capacity slack, in percent of nhashes_init.
+ *
+ * A Wagner round turns n rows into ~n^2/nhashes_init rows, so nhashes_init is a
+ * fixed point of the row count — but an UNSTABLE one. Sizing the buffers at
+ * exactly nhashes_init makes wagner_round's cap equal the mean: upward
+ * fluctuations are truncated while downward ones compound into every later
+ * round, so the population ratchets down and solutions are lost with it.
+ * Measured on 200/9 over 160 nonces: at 0% slack 18% of rounds hit the cap and
+ * the final row count decays to 1.92M of 2.10M, yielding 1.71 solutions per
+ * solve; at 10% it is 7%, 2.06M and 1.86 solutions (+9.2%) for 2% more row
+ * work. The gain is flat from there (1.85 at 15%, 1.87 at 25%), so 10% buys
+ * essentially all of it at the smallest memory cost.                        */
+#define EH_ROW_SLACK_PCT 10
+
+/* Workspace size estimates (slot_bytes = hash_length + 4, N = max_rows):
  *
  *   Variant  slot  hbuf×2          pairs(wk×N×8)    sort   buckets  Total
- *   96/5      16B  2×0.13M×16=4MB  5×0.13M×8=5MB   0.5MB   0.5MB  ~10 MB
- *   200/9     34B  2×2M×34=136MB   9×2M×8=144MB    8MB     8MB    ~296 MB
- *   144/5     22B  2×33M×22=1.4GB  5×33M×8=1.3GB  134MB  128MB   ~3.0 GB
- *   192/7     28B  2×33M×28=1.8GB  7×33M×8=1.8GB  134MB  128MB   ~3.8 GB
- *   125/4     24B  2×67M×24=3.2GB  4×67M×8=2.1GB  268MB  264MB   ~5.8 GB
+ *   96/5      16B  2×0.14M×16=5MB  5×0.14M×8=6MB   0.6MB   0.5MB  ~11 MB
+ *   200/9     34B  2×2.3M×34=150MB 9×2.3M×8=158MB   9MB     8MB   ~325 MB
+ *   144/5     22B  2×37M×22=1.5GB  5×37M×8=1.5GB  148MB  128MB   ~3.3 GB
+ *   192/7     28B  2×37M×28=2.0GB  7×37M×8=2.0GB  148MB  128MB   ~4.2 GB
+ *   125/4     24B  2×74M×24=3.5GB  4×74M×8=2.4GB  295MB  264MB   ~6.4 GB
  *
  * eh_workspace_alloc() sizes dynamically via eh_workspace_bytes().         */
 
@@ -53,10 +67,10 @@ bool eh_params_from_stratum(eh_params_t *out, const char *wn_wk_str,
 
 /* Single flat allocation parcelled into named regions. */
 typedef struct {
-    uint8_t  *hbuf0;          /* nhashes_init × slot_bytes               */
-    uint8_t  *hbuf1;          /* nhashes_init × slot_bytes               */
-    uint32_t *pairs;          /* wk × pairs_per_round × 2 (flat)         */
-    uint32_t *sort_orig;      /* nhashes_init entries                    */
+    uint8_t  *hbuf0;          /* max_rows × slot_bytes                   */
+    uint8_t  *hbuf1;          /* max_rows × slot_bytes                   */
+    uint32_t *pairs;          /* wk × max_rows × 2 (flat)                */
+    uint32_t *sort_orig;      /* max_rows entries                        */
     uint32_t *bucket_start;   /* nbuckets + 1 entries                    */
     uint32_t *bucket_size;    /* nbuckets entries                        */
     uint32_t  round_cnt[12];  /* k+1 entries (k ≤ 10)                   */
@@ -93,7 +107,10 @@ void eh_workspace_free(eh_workspace_t *ws);
  * solutions: caller array, each EH_MAX_SOLUTION_BYTES bytes.
  * Returns number of solutions written (0–max_sols).                       */
 #define EH_MAX_SOLUTION_BYTES 1344   /* maximum across all supported variants */
-#define EH_MAX_SOLS            4
+/* Solutions per solve are ~Poisson(1.9) for 200/9, so a cap of 4 truncated the
+ * solve loop on ~4% of solves and cost 3.5% of all solutions. 16 makes the
+ * truncation unreachable in practice for 21 KB of caller stack.            */
+#define EH_MAX_SOLS           16
 
 /* Difficulty scale factor between the pool-reported difficulty and the
  * cpuminer-opt internal diff scale (hash_to_diff / diff_to_hash):

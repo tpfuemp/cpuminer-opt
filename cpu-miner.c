@@ -281,6 +281,18 @@ uint64_t net_blocks = 0;
 uint32_t opt_work_size = 0;
 bool     opt_bell = false;
 
+/* Difficulty scales. Internal difficulty uses the Bitcoin difficulty-1 base
+ * (target = 2**224 / diff, see diff_to_hash), so the expected number of hashes
+ * to reach a difficulty is always diff_internal * 2**32. opt_target_factor
+ * only converts internal difficulty to the units the pool reports and must
+ * never appear in a hash count. Which globals are in which scale:
+ *   pool scale: net_diff, stratum_diff, work->sharediff, share_stats.*_diff
+ *   internal  : work->targetdiff, last_targetdiff                          */
+static inline double pool_diff_to_internal( double diff )
+{
+   return opt_target_factor > 0. ? diff / opt_target_factor : diff;
+}
+
 // Format a difficulty as a human-readable string with a k/M/G/T/P suffix
 // instead of exponential notation (e.g. 170100 -> "170.10k", 2.26e6 -> "2.26M").
 static const char *format_diff( char *buf, size_t bufsz, double d )
@@ -568,10 +580,10 @@ static bool work_decode( const json_t *val, struct work *work )
         return false;
 
     // many of these aren't used solo.
-    net_diff =
-    work->targetdiff = 
-    stratum_diff =
+    work->targetdiff =
     last_targetdiff = hash_to_diff( work->target );
+    net_diff =
+    stratum_diff = work->targetdiff * opt_target_factor;
     work->sharediff = 0;
     algo_gate.decode_extra_data( work, &net_blocks );
 
@@ -1019,7 +1031,8 @@ static bool gbt_work_decode( const json_t *val, struct work *work )
    // reverse the bytes in target
    casti_v128( work->target, 0 ) = v128_bswap128( casti_v128( target, 1 ) );
    casti_v128( work->target, 1 ) = v128_bswap128( casti_v128( target, 0 ) );
-   net_diff = work->targetdiff = hash_to_diff( work->target );
+   work->targetdiff = hash_to_diff( work->target );
+   net_diff = work->targetdiff * opt_target_factor;   // pool scale, display
 
    tmp = json_object_get( val, "workid" );
    if ( tmp )
@@ -1395,7 +1408,9 @@ static int share_result( int result, struct work *work,
    if ( likely( result ) )
    {
       accept_sum++;
-      norm_diff_sum += my_stats.target_diff;
+      // sess_hrate converts this sum to a hash count, so accumulate it in the
+      // same internal scale as target_diff in report_summary_log.
+      norm_diff_sum += pool_diff_to_internal( my_stats.target_diff );
       if ( solved ) solved_sum++;
    }
    else
@@ -1751,7 +1766,7 @@ start:
       if ( work->height > last_block_height )
       {
          last_block_height = work->height;
-         last_targetdiff = net_diff;
+         last_targetdiff = pool_diff_to_internal( net_diff );
 
          char db[24];
          applog( LOG_BLUE, "New Block %d, Tx %d, Net Diff %s, Ntime %08x",
@@ -1776,7 +1791,7 @@ start:
          {
             double miner_hr = 0.;
             double net_hr = net_hashrate;
-            double nd = net_diff * exp32;
+            double nd = pool_diff_to_internal( net_diff ) * exp32;
             char net_hr_units[4] = {0};
             char miner_hr_units[4] = {0};
             char net_ttf[32];
@@ -2361,7 +2376,8 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
       last_block_height = stratum.block_height;
       stratum_diff      = sctx->job.diff;
       last_targetdiff   = g_work->targetdiff;
-      if ( lowest_share < last_targetdiff )
+      // lowest_share comes from work->sharediff, which is pool scale.
+      if ( lowest_share < last_targetdiff * opt_target_factor )
          lowest_share = 9e99;
     }
 
@@ -2379,7 +2395,10 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
 
        if ( likely( hr > 0. ) )
        {
-          double nd = net_diff * exp32;
+          /* TTF is a hash count: it needs internal difficulty, so undo the
+           * pool scaling applied to net_diff above. targetdiff is already
+           * internal.                                                       */
+          double nd = pool_diff_to_internal( net_diff ) * exp32;
           char hr_units[4] = {0};
           char block_ttf[32];
           char share_ttf[32];
@@ -3926,7 +3945,7 @@ int main(int argc, char *argv[])
       /* -t was given explicitly, so the cap above is deliberately skipped.
        * Still warn if the request cannot fit — silently reserving more than
        * RAM looks exactly like a memory leak to the user (equihash192 at
-       * 3.6 GB/thread x 12 = 44 GB), and inside a container it ends in an
+       * 4.2 GB/thread x 12 = 50 GB), and inside a container it ends in an
        * OOM kill rather than an allocation failure.                        */
       size_t ws = algo_gate.get_workspace_size();
       if ( ws > 0 )

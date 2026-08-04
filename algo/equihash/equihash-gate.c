@@ -255,13 +255,22 @@ int scanhash_equihash(struct work *work, uint32_t max_nonce,
     /* Each scanhash call must try a DIFFERENT nonce (different iter value).
      * The outer loop keeps calling scanhash for the same job; if we always
      * use iter=0 we'd hash the same nonce every time and never explore the
-     * nonce space.  Reset the counter on each new job.                      */
+     * nonce space.  Reset the counter on each new job.
+     *
+     * Work with no job_id (benchmark, getwork) is one continuous job, not a
+     * new job every call: testing `!work->job_id` reset the counter on every
+     * call, so --benchmark re-solved a single header forever and reported the
+     * solution count of that one header rather than a nonce-space average.  */
     static __thread uint64_t iter_counter = 0;
     static __thread char     last_job_id[64] = {0};
-    if (!work->job_id || strcmp(work->job_id, last_job_id) != 0) {
+    static __thread bool     iter_started = false;
+    const char *job_id = work->job_id ? work->job_id : "";
+    if (!iter_started || strcmp(job_id, last_job_id) != 0) {
         iter_counter = (uint64_t)thr_id;   /* thread-stagger: each thread
                                             * starts at a unique offset      */
-        strncpy(last_job_id, work->job_id ? work->job_id : "", 63);
+        strncpy(last_job_id, job_id, 63);
+        last_job_id[63] = '\0';
+        iter_started = true;
     }
     *iter = iter_counter;
     iter_counter += opt_n_threads;   /* step by thread count so threads
@@ -272,14 +281,13 @@ int scanhash_equihash(struct work *work, uint32_t max_nonce,
     /* Stale-work guard. A solve can take seconds (tens of seconds for large
      * variants like 192/7), during which one or more new stratum jobs may
      * arrive and set work_restart. Any solution we found belongs to the now
-     * superseded job and the pool would reject it as "Invalid job id". Drop
-     * the whole batch and let the outer miner loop pick up the latest
-     * g_work on its next iteration. Benchmark mode never sets restart, so
-     * this is a no-op there.                                                */
-    if (work_restart[thr_id].restart) {
-        *hashes_done = 1;
-        return 0;
-    }
+     * superseded job and the pool would reject it as "Invalid job id", so
+     * submit nothing and let the outer miner loop pick up the latest g_work
+     * on its next iteration. The batch is still verified and counted below:
+     * hashes_done measures work done, not shares sent, and verification costs
+     * microseconds against a multi-second solve. Benchmark mode never sets
+     * restart, so this is a no-op there.                                    */
+    const bool stale = work_restart[thr_id].restart;
 
     int verified = 0;   /* solutions that pass full verification */
     for (int s = 0; s < nsols; s++) {
@@ -310,7 +318,7 @@ int scanhash_equihash(struct work *work, uint32_t max_nonce,
                    "equihash thr%d: valid solution found%s",
                    thr_id, meets_target ? " (meets target)" : "");
 
-        if (meets_target && !opt_benchmark) {
+        if (meets_target && !opt_benchmark && !stale) {
             int sol_size = p->solution_size;
 
             /* Dump the full (personalization, header, solution) tuple so a
@@ -345,11 +353,24 @@ int scanhash_equihash(struct work *work, uint32_t max_nonce,
         }
     }
 
-    *hashes_done = 1;   /* one solve attempt = one "hash" in cpuminer terms */
+    /* Every verified solution is hashed and tested against the target, so it
+     * is one independent draw with probability target/2**256. The difficulty
+     * math elsewhere (expected work = diff * 2**32, see diff_to_hash) counts
+     * those draws, not solve attempts, and so does the pool when it derives a
+     * rate from submitted shares. Reporting 1 per solve made TTF and the
+     * displayed rate wrong by the solutions-per-solve ratio (~1.9 for 200/9).
+     * This is the conventional Sol/s unit for equihash.
+     *
+     * The framework recomputes thr_hashrates from a single call, so the rate
+     * shown now varies with the solution count of the last solve instead of
+     * sitting at a constant (biased) value; the average, and total_hashes,
+     * are right. A solve that yields none reports 0, which with -t 1 can
+     * briefly suppress the hr-gated TTF line.                               */
+    *hashes_done = (uint64_t)verified;
 
     if (opt_debug)
-        applog(LOG_DEBUG, "equihash thr%d: 1 solve → %d raw, %d verified",
-               thr_id, nsols, verified);
+        applog(LOG_DEBUG, "equihash thr%d: 1 solve → %d raw, %d verified%s",
+               thr_id, nsols, verified, stale ? " (stale, not submitted)" : "");
 
     return 0;
 }

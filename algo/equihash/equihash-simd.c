@@ -295,7 +295,7 @@ static uint32_t simd_wagner_round(int round, uint32_t n_in, uint32_t max_out,
                               min_i < min_j ? min_i : min_j);
 
                 uint32_t *pr = ws->pairs +
-                    ((size_t)round * p->pairs_per_round + n_out) * 2;
+                    ((size_t)round * p->max_rows + n_out) * 2;
                 pr[0] = ws->sort_orig[i];
                 pr[1] = ws->sort_orig[j];
                 n_out++;

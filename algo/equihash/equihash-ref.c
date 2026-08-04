@@ -134,7 +134,7 @@ uint32_t eh_ref_wagner_round(int round, uint32_t n_in, uint32_t max_out,
 
                 /* Record source positions for tree reconstruction */
                 uint32_t *pr = ws->pairs +
-                    ((size_t)round * p->pairs_per_round + n_out) * 2;
+                    ((size_t)round * p->max_rows + n_out) * 2;
                 pr[0] = ws->sort_orig[i];
                 pr[1] = ws->sort_orig[j];
                 n_out++;
