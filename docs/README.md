@@ -91,6 +91,7 @@ Per-algorithm documentation lives in [`algorithms/`](algorithms/):
 - [Equihash family](algorithms/equihash.md) — Zcash, Bitcoin Gold, Flux and others
 - [yescrypt / yespower family](algorithms/yescrypt-yespower.md) — BitZeny, Koto, Yenten, MicroBitcoin and others
 - [Argon2d family](algorithms/argon2d.md) — Credits, Dynamic, Unitus
+- [Balloon](algorithms/balloon.md) — Mateable (MTBC)
 - [Lyra2 family](algorithms/lyra2.md) — Vertcoin, Monacoin, Zcoin/Firo, Garlicoin
 - [X-chains (x11–x17 and relatives)](algorithms/x-chains.md) — Dash and many others
 - [SkyDoge](algorithms/skydoge.md) — SkyDoge
