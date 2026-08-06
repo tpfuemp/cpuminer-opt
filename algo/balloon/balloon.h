@@ -74,12 +74,54 @@ void balloon_bitstream_raw( uint8_t *out, size_t outlen,
  * One context per thread. It is mutable state, so two threads sharing one is
  * the "works at -t 1, garbage at -t 16" bug.                               */
 
+/* Three fixed message lengths, so the padding is constant: keep each message
+ * in whole padded blocks and write the pad once per hash, not per digest.   */
+#define BALLOON_MSG_FILL   132   /* ctr + salt + header + s_cost + t_cost  */
+#define BALLOON_MSG_EXPAND  40   /* ctr + previous block                   */
+#define BALLOON_MSG_MIX    168   /* ctr + 5 blocks                         */
+#define BALLOON_PAD( n )   ( ( ( (n) + 8 ) / 64 + 1 ) * 64 )   /* padded size */
+
+/* ── Two nonces at a time ─────────────────────────────────────────────────
+ * The index stream is nonce-independent, so paired nonces walk identical
+ * offsets: interleaving two hardware SHA streams hides the compression
+ * latency. Built wherever the 2-way transform exists, so both paths are
+ * testable in every such build.                                            */
+#if ( defined(__x86_64__) && defined(__SHA__) ) \
+ || ( defined(__ARM_NEON) && defined(__ARM_FEATURE_SHA2) )
+  #define BALLOON_HAVE_2WAY 1
+#else
+  #define BALLOON_HAVE_2WAY 0
+#endif
+
+/* 1.82x on a Cortex-A76 cluster, 1.04-1.07x on Rocket Lake, pool-confirmed on
+ * both. ⚠️ Measure whole hashes: per-block timing says 0.96x on x86, wrong
+ * even in sign. BALLOON_FORCE_{1,2}WAY override for A/B.                    */
+#if BALLOON_HAVE_2WAY && !defined(BALLOON_FORCE_1WAY)
+  #define BALLOON_USE_2WAY 1
+#else
+  #define BALLOON_USE_2WAY 0
+#endif
+
 typedef struct
 {
    uint8_t  buf[ BALLOON_N_BLOCKS * BALLOON_BLOCK_SIZE ];
    uint16_t idx[ BALLOON_N_INDICES ];
    uint8_t  idx_salt[ BALLOON_SALT_LEN ];    /* which salt `idx` is for */
    bool     idx_valid;
+
+   /* ⚠️ aligned(64) is load-bearing: the transforms use aligned vector loads
+    * and fault otherwise.                                                  */
+   uint8_t  mfill  [ BALLOON_PAD( BALLOON_MSG_FILL   ) ] __attribute__((aligned(64)));
+   uint8_t  mexpand[ BALLOON_PAD( BALLOON_MSG_EXPAND ) ] __attribute__((aligned(64)));
+   uint8_t  mmix   [ BALLOON_PAD( BALLOON_MSG_MIX    ) ] __attribute__((aligned(64)));
+
+#if BALLOON_HAVE_2WAY
+   /* Lane 1; lane 0 reuses the members above. Untouched by the 1-way path. */
+   uint8_t  buf1[ BALLOON_N_BLOCKS * BALLOON_BLOCK_SIZE ];
+   uint8_t  mfill1  [ BALLOON_PAD( BALLOON_MSG_FILL   ) ] __attribute__((aligned(64)));
+   uint8_t  mexpand1[ BALLOON_PAD( BALLOON_MSG_EXPAND ) ] __attribute__((aligned(64)));
+   uint8_t  mmix1   [ BALLOON_PAD( BALLOON_MSG_MIX    ) ] __attribute__((aligned(64)));
+#endif
 } balloon_ctx __attribute__((aligned(64)));
 
 /* Mark the cached index table unusable. Only needed to force a rebuild; the
@@ -99,6 +141,16 @@ balloon_ctx *balloon_thread_ctx( void );
  * `balloon_hash`, which other implementations export with a different
  * signature — a test that links both would otherwise not compile.           */
 void balloon_hash_header( balloon_ctx *ctx, const void *input, void *digest );
+
+#if BALLOON_HAVE_2WAY
+/* Two nonces of the SAME JOB at once. ⚠️ Both headers must share bytes 0..31 —
+ * they index one shared table, so a caller that pairs headers from different
+ * jobs gets a well-formed digest computed from the wrong index stream. Pairing
+ * nonces within one `scanhash` call satisfies this by construction.         */
+void balloon_hash_header_2way( balloon_ctx *ctx,
+                               const void *input0, const void *input1,
+                               void *digest0, void *digest1 );
+#endif
 
 /* Run every known-answer vector. NULL if they all pass, otherwise the name of
  * the first that failed. A failure is fatal — see balloon-kat.h.            */

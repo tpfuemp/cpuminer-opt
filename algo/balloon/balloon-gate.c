@@ -13,6 +13,10 @@ int scanhash_balloon( struct work *work, uint32_t max_nonce,
 {
    uint32_t _ALIGN(64) hash[8];
    uint32_t _ALIGN(64) edata[20];
+#if BALLOON_USE_2WAY
+   uint32_t _ALIGN(64) hash1[8];
+   uint32_t _ALIGN(64) edata1[20];
+#endif
    uint32_t *pdata = work->data;
    uint32_t *ptarget = work->target;
    const uint32_t first_nonce = pdata[19];
@@ -34,6 +38,36 @@ int scanhash_balloon( struct work *work, uint32_t max_nonce,
    for ( int i = 0; i < 19; i++ )
       be32enc( &edata[i], pdata[i] );
 
+#if BALLOON_USE_2WAY
+
+   /* Two nonces per pass. They differ only at word 19, so they share the salt
+    * and therefore the index table — which is what makes the pairing free.
+    * `max_nonce - 1` so the pair can never step past the range.            */
+   memcpy( edata1, edata, sizeof edata1 );
+   const uint32_t last_nonce = max_nonce - 1;
+
+   do
+   {
+      be32enc( &edata [19], n     );
+      be32enc( &edata1[19], n + 1 );
+      balloon_hash_header_2way( ctx, edata, edata1, hash, hash1 );
+
+      /* Both lanes are candidates and both can submit. */
+      if ( unlikely( valid_hash( hash, ptarget ) && !bench ) )
+      {
+         pdata[19] = n;
+         submit_solution( work, hash, mythr );
+      }
+      if ( unlikely( valid_hash( hash1, ptarget ) && !bench ) )
+      {
+         pdata[19] = n + 1;
+         submit_solution( work, hash1, mythr );
+      }
+      n += 2;
+   } while ( n < last_nonce && !(*restart) );
+
+#else
+
    do
    {
       be32enc( &edata[19], n );
@@ -46,6 +80,8 @@ int scanhash_balloon( struct work *work, uint32_t max_nonce,
       }
       n++;
    } while ( n < max_nonce && !(*restart) );
+
+#endif
 
    pdata[19] = n;
    *hashes_done = n - first_nonce;

@@ -94,14 +94,18 @@ perfectly:
 
 | config | mask | h/s |
 |---|---|---|
-| A55 ×1 | `0x01` | 140 |
-| A76 ×1 | `0x10` | 279 |
-| A55 ×4 | `0x0f` | 551 |
-| A76 ×4 | `0xf0` | 1111 |
-| **all 8 cores** | — | **1628** |
+| A76 ×4 | `0xf0` | **2064** |
+| **all 8 cores** | — | **2751** |
 
-At 1628 h/s that ~15 W board **outruns the 65 W i7-11700F (1570 h/s)**, so balloon is one of the
-algorithms where a small ARM machine is the better miner.
+At 2751 h/s that ~15 W board **outruns the 65 W i7-11700F (1570 h/s) by 1.75×**, so balloon is one
+of the algorithms where a small ARM machine is decisively the better miner.
+
+On any CPU with hardware SHA-256, balloon hashes **two nonces at a time** through interleaved SHA
+streams — the index sequence is shared, so both lanes read the same offsets and nothing is gathered.
+Worth **1.82× on Cortex-A76**, but only 1.07× on the little A55s, whose 128 KiB L2 cannot hold two
+lanes' working sets; that is why the whole-device gain is 1.55× rather than 1.8×. On x86 it is
+**1.04–1.07×** — smaller because the pipeline is closer to saturated, but still a gain at every
+thread count including `-t 16`. Build with `-DBALLOON_FORCE_1WAY` to compare.
 
 Use **all cores** here: the little cluster is 98% additive and worth a third of the total, so
 restricting to the big cores costs 32%.
