@@ -30,9 +30,13 @@ the most thoroughly SIMD-optimized algorithms in the project.
 | `sha256dt` | double SHA-256 with a **custom initialization vector** | |
 | `sha512256d` | double SHA-512/256 (SHA-512 truncated to 256 bits) | |
 | `sha3d` | double Keccak-256 (SHA-3 padding) | BSHA3 |
+| `sha3t` | triple SHA3-256 | BitcoinIII (BC3), Fjarcode (FJAR) — see [SHA3T](sha3t.md) |
 
 (Veil's `sha256dv` is a SHA-256d variant with its own Stratum protocol — see
 [SHA256Dv](sha256dv.md).)
+
+⚠️ `sha3d` and `sha3t` differ by more than the round count: `sha3d` builds the Stratum
+merkle root with `sha3d`, `sha3t` uses the ordinary `sha256d`. See [SHA3T](sha3t.md).
 
 ## Keccak
 

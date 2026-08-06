@@ -73,6 +73,7 @@ bool register_sha256dv_algo( algo_gate_t *gate );
 bool register_sha256q_algo( algo_gate_t *gate );
 bool register_sha256t_algo( algo_gate_t *gate );
 bool register_sha3d_algo( algo_gate_t *gate );
+bool register_sha3t_algo( algo_gate_t *gate );
 bool register_sha512256d_algo( algo_gate_t *gate );
 bool register_skein_algo( algo_gate_t *gate );
 bool register_skein2_algo( algo_gate_t *gate );

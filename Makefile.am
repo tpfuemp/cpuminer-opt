@@ -137,6 +137,8 @@ cpuminer_SOURCES = \
   algo/keccak/keccak-gate.c \
   algo/keccak/sha3d-4way.c \
   algo/keccak/sha3d.c \
+  algo/keccak/sha3t-4way.c \
+  algo/keccak/sha3t.c \
   algo/lanehash/lane.c \
   algo/luffa/luffa_for_sse2.c \
   algo/luffa/luffa-hash-2way.c \

@@ -117,6 +117,7 @@ Supported Algorithms
                           sha256q       Quad SHA-256
                           sha256t       Triple SHA-256
                           sha3d         Double keccak256 (BSHA3)
+                          sha3t         Triple SHA3-256, BitcoinIII (BC3), Fjarcode (FJAR)
                           sha512256d
                           skein         Skein+Sha (Skeincoin)
                           skein2        Double Skein (Woodcoin)

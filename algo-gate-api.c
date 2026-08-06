@@ -352,6 +352,7 @@ case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_SHA256Q:      rc = register_sha256q_algo       ( gate ); break;
     case ALGO_SHA256T:      rc = register_sha256t_algo       ( gate ); break;
     case ALGO_SHA3D:        rc = register_sha3d_algo         ( gate ); break;
+    case ALGO_SHA3T:        rc = register_sha3t_algo         ( gate ); break;
     case ALGO_SHA512256D:   rc = register_sha512256d_algo    ( gate ); break;
     case ALGO_SKEIN:        rc = register_skein_algo         ( gate ); break;
     case ALGO_SKEIN2:       rc = register_skein2_algo        ( gate ); break;
@@ -448,6 +449,7 @@ const char* const algo_alias_map[][2] =
   { "neo",               "neoscrypt"      },
   { "phi",               "phi1612"        },
   { "scryptn2",          "scrypt:1048576" },
+  { "sha3-256t",         "sha3t"          },   /* pool-side name          */
   { "sib",               "x11gost"        },
   /* Equihash coin aliases */
   { "btg",               "equihash144"    },   /* Bitcoin Gold            */
