@@ -1,5 +1,5 @@
 /*
- * sha3t — batched paths (8x64 AVX-512 / 4x64 AVX2 / 2x64 SSE2+NEON).
+ * sha3t -- batched paths (8x64 AVX-512 / 4x64 AVX2 / 2x64 SSE2+NEON).
  *
  * Structurally sha3d-4way.c with a third keccak256 iteration; the shared n-way
  * cores take SHA3 padding from hard_coded_eb, set by register_sha3t_algo.
@@ -8,7 +8,7 @@
  * then compare the batched path against it lane by lane over randomised
  * headers. Hard-fails, so a non-conformant build refuses to mine.
  *
- * ⚠ Scalar and batched paths use different nonce conventions, and the
+ * NOTE: Scalar and batched paths use different nonce conventions, and the
  * differential must reproduce it or it reports false failures: scalar hashes
  * be32enc(n) at header offset 76, the batched loops blend a raw vector word so
  * lane L hashes le32enc(n+L) and byte-swaps on submit. Both self-consistent
@@ -65,22 +65,12 @@ static void sha3t_rand_header( uint32_t *pdata, uint32_t *lcg )
 
 #if defined(SHA3T_8WAY)
 
+// Pre-padded driver instead of three init/update/close round trips; see
+// SHA3T_PREPAD_FN in keccak-hash-4way.c. The self-test below re-checks it
+// against the scalar reference at every start.
 void sha3t_hash_8way( void *state, const void *input )
 {
-   uint32_t buffer[16*8] __attribute__ ((aligned (128)));
-   keccak256_8x64_context ctx;
-
-   keccak256_8x64_init( &ctx );
-   keccak256_8x64_update( &ctx, input, 80 );
-   keccak256_8x64_close( &ctx, buffer );
-
-   keccak256_8x64_init( &ctx );
-   keccak256_8x64_update( &ctx, buffer, 32 );
-   keccak256_8x64_close( &ctx, buffer );
-
-   keccak256_8x64_init( &ctx );
-   keccak256_8x64_update( &ctx, buffer, 32 );
-   keccak256_8x64_close( &ctx, state );
+   sha3t_8x64_prepad( state, input );
 }
 
 int scanhash_sha3t_8way( struct work *work, uint32_t max_nonce,
@@ -163,22 +153,10 @@ bool sha3t_8way_self_test( void )
 
 #elif defined(SHA3T_4WAY)
 
+// Pre-padded driver, as for the 8-way path above.
 void sha3t_hash_4way( void *state, const void *input )
 {
-   uint32_t buffer[16*4] __attribute__ ((aligned (64)));
-   keccak256_4x64_context ctx;
-
-   keccak256_4x64_init( &ctx );
-   keccak256_4x64_update( &ctx, input, 80 );
-   keccak256_4x64_close( &ctx, buffer );
-
-   keccak256_4x64_init( &ctx );
-   keccak256_4x64_update( &ctx, buffer, 32 );
-   keccak256_4x64_close( &ctx, buffer );
-
-   keccak256_4x64_init( &ctx );
-   keccak256_4x64_update( &ctx, buffer, 32 );
-   keccak256_4x64_close( &ctx, state );
+   sha3t_4x64_prepad( state, input );
 }
 
 int scanhash_sha3t_4way( struct work *work, uint32_t max_nonce,
@@ -258,22 +236,10 @@ bool sha3t_4way_self_test( void )
 
 #elif defined(SHA3T_2WAY)
 
+// Pre-padded driver, as for the 8-way path above.
 void sha3t_hash_2x64( void *state, const void *input )
 {
-   uint32_t buffer[16*2] __attribute__ ((aligned (64)));
-   keccak256_2x64_context ctx;
-
-   keccak256_2x64_init( &ctx );
-   keccak256_2x64_update( &ctx, input, 80 );
-   keccak256_2x64_close( &ctx, buffer );
-
-   keccak256_2x64_init( &ctx );
-   keccak256_2x64_update( &ctx, buffer, 32 );
-   keccak256_2x64_close( &ctx, buffer );
-
-   keccak256_2x64_init( &ctx );
-   keccak256_2x64_update( &ctx, buffer, 32 );
-   keccak256_2x64_close( &ctx, state );
+   sha3t_2x64_prepad( state, input );
 }
 
 int scanhash_sha3t_2x64( struct work *work, uint32_t max_nonce,

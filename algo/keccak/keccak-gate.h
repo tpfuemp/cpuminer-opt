@@ -20,11 +20,20 @@
   #define SHA3D_2WAY 1
 #endif
 
+// NOTE: Narrower NEON arm than the sha3d/keccak ladders above, deliberately.
+// Without the ARMv8.2 SHA3 extension the 2x64 NEON path loses to scalar: NEON
+// has no 64-bit rotate, so v128_rol64 is a shift plus SLI (destructive,
+// 2-cycle, single-issue), while scalar folds a 1-cycle ROR into the XOR
+// (EOR Xd,Xn,Xm,ROR #n). Measured on RK3588S: scalar +35% on in-order A55,
+// +3% on A76, +12% device-wide. FEAT_SHA3 should swing it back (EOR3, BCAX),
+// so gate on the extension, not on "is this ARM". x86 SSE2 keeps 2x64.
 #if defined(SIMD512)
   #define SHA3T_8WAY 1
 #elif defined(__AVX2__)
   #define SHA3T_4WAY 1
-#elif defined(__SSE2__) || defined(__ARM_NEON)
+#elif defined(__SSE2__)
+  #define SHA3T_2WAY 1
+#elif defined(__ARM_NEON) && defined(__ARM_FEATURE_SHA3)
   #define SHA3T_2WAY 1
 #endif
 

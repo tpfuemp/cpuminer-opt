@@ -57,6 +57,74 @@ static const uint64_t RC[] = {
 
 #define DO(x)   x
 
+/*
+ * sha3t = SHA3-256^3( 80-byte header ), driven from pre-padded state.  Emitted
+ * once per ISA section below, where VEC/KCTX/SPLAT/XORV and KECCAK_F_1600 are
+ * already defined for that target.  Additive: keccak256_*_ctx is untouched.
+ *
+ * All three messages are one SHA3-256 rate block (136 B) with padding known at
+ * compile time, so no buf, message memcpy, padding VLA or INPUT_BUF is needed.
+ *
+ * NOTE: SHA3 padding (0x06) is baked in and hard_coded_eb is ignored -- not
+ * usable for keccak/sha3d, which need 0x01.
+ *
+ * Lanes 0..3 carry between passes unchanged: pass 1 leaves ( w0, ~w1, ~w2, w3 )
+ * and pass 2 wants complement-init XOR digest, where neg1 ^ ~x == x.  Only the
+ * final digest needs uncomplementing, so 2 NOT64s instead of 18.
+ */
+#define SHA3T_PREPAD_FN( NAME, VEC, KCTX, VZERO, VNEG1, SPLAT, XORV )         \
+void NAME( void *dst, const void *vdata )                                     \
+{                                                                             \
+   KCTX ctx;                                                                  \
+   KCTX *kc = &ctx;              /* the a00..a44 macros dereference kc */     \
+   const VEC *h = (const VEC*)vdata;                                          \
+   const VEC zero  = VZERO;                                                   \
+   const VEC neg1  = VNEG1;                                                   \
+   const VEC pad06 = SPLAT( 0x06 );                                           \
+   const VEC pad80 = SPLAT( 0x8000000000000000ull );                          \
+                                                                              \
+   /* pass 1: complement-init XOR ( header | 0x06 | 0.. | 0x80 ) */           \
+   kc->w[ 0] = h[0];               kc->w[ 1] = XORV( neg1, h[1] );            \
+   kc->w[ 2] = XORV( neg1, h[2] );                                            \
+   kc->w[ 3] = h[3];               kc->w[ 4] = h[4];                          \
+   kc->w[ 5] = h[5];               kc->w[ 6] = h[6];                          \
+   kc->w[ 7] = h[7];                                                          \
+   kc->w[ 8] = XORV( neg1, h[8] );                                            \
+   kc->w[ 9] = h[9];                                                          \
+   kc->w[10] = pad06;              kc->w[11] = zero;                          \
+   kc->w[12] = neg1;               kc->w[13] = zero;                          \
+   kc->w[14] = zero;               kc->w[15] = zero;                          \
+   kc->w[16] = pad80;              kc->w[17] = neg1;                          \
+   kc->w[18] = zero;               kc->w[19] = zero;                          \
+   kc->w[20] = neg1;               kc->w[21] = zero;                          \
+   kc->w[22] = zero;               kc->w[23] = zero;                          \
+   kc->w[24] = zero;                                                          \
+   KECCAK_F_1600;                                                             \
+                                                                              \
+   /* passes 2 and 3: lanes 0..3 carry over, the other 21 are constants */    \
+   for ( int pass = 0; pass < 2; pass++ )                                     \
+   {                                                                          \
+      kc->w[ 4] = pad06;           kc->w[ 5] = zero;                          \
+      kc->w[ 6] = zero;            kc->w[ 7] = zero;                          \
+      kc->w[ 8] = neg1;            kc->w[ 9] = zero;                          \
+      kc->w[10] = zero;            kc->w[11] = zero;                          \
+      kc->w[12] = neg1;            kc->w[13] = zero;                          \
+      kc->w[14] = zero;            kc->w[15] = zero;                          \
+      kc->w[16] = pad80;           kc->w[17] = neg1;                          \
+      kc->w[18] = zero;            kc->w[19] = zero;                          \
+      kc->w[20] = neg1;            kc->w[21] = zero;                          \
+      kc->w[22] = zero;            kc->w[23] = zero;                          \
+      kc->w[24] = zero;                                                       \
+      KECCAK_F_1600;                                                          \
+   }                                                                          \
+                                                                              \
+   VEC *out = (VEC*)dst;                                                      \
+   out[0] = kc->w[0];                                                         \
+   out[1] = XORV( neg1, kc->w[1] );   /* undo the lane complement */          \
+   out[2] = XORV( neg1, kc->w[2] );                                           \
+   out[3] = kc->w[3];                                                         \
+}
+
 #if defined(SIMD512)
 
 #define INPUT_BUF(size)   do { \
@@ -82,20 +150,28 @@ static const uint64_t RC[] = {
 
 #define KECCAK_F_1600   DO(KECCAK_F_1600_512)
 
-#define KECCAK_F_1600_512   do { \
-    int j; \
-    for (j = 0; j < 24; j += 8) \
-    { \
-       KF_ELT( 0,  1, _mm512_set1_epi64( RC[j + 0] ) ); \
-       KF_ELT( 1,  2, _mm512_set1_epi64( RC[j + 1] ) ); \
-       KF_ELT( 2,  3, _mm512_set1_epi64( RC[j + 2] ) ); \
-       KF_ELT( 3,  4, _mm512_set1_epi64( RC[j + 3] ) ); \
-       KF_ELT( 4,  5, _mm512_set1_epi64( RC[j + 4] ) ); \
-       KF_ELT( 5,  6, _mm512_set1_epi64( RC[j + 5] ) ); \
-       KF_ELT( 6,  7, _mm512_set1_epi64( RC[j + 6] ) ); \
-       KF_ELT( 7,  8, _mm512_set1_epi64( RC[j + 7] ) ); \
+// One group of 8 rounds; P8_TO_P0 restores the variable naming, so a
+// permutation is three of these. `j` must be a literal, so the RC[] indices
+// stay compile-time constants.
+#define KECCAK_8ROUNDS_512( j )   do { \
+       KF_ELT( 0,  1, _mm512_set1_epi64( RC[(j) + 0] ) ); \
+       KF_ELT( 1,  2, _mm512_set1_epi64( RC[(j) + 1] ) ); \
+       KF_ELT( 2,  3, _mm512_set1_epi64( RC[(j) + 2] ) ); \
+       KF_ELT( 3,  4, _mm512_set1_epi64( RC[(j) + 3] ) ); \
+       KF_ELT( 4,  5, _mm512_set1_epi64( RC[(j) + 4] ) ); \
+       KF_ELT( 5,  6, _mm512_set1_epi64( RC[(j) + 5] ) ); \
+       KF_ELT( 6,  7, _mm512_set1_epi64( RC[(j) + 6] ) ); \
+       KF_ELT( 7,  8, _mm512_set1_epi64( RC[(j) + 7] ) ); \
        P8_TO_P0; \
-    } \
+} while (0)
+
+// Fully unrolled: the 3-iteration loop this replaced was not being unrolled by
+// GCC, so each group ended at a scheduling barrier and RC[] stayed indexed.
+// NOTE: 8-way only -- a loss on the narrower widths, see KECCAK_F_1600_256.
+#define KECCAK_F_1600_512   do { \
+    KECCAK_8ROUNDS_512(  0 ); \
+    KECCAK_8ROUNDS_512(  8 ); \
+    KECCAK_8ROUNDS_512( 16 ); \
 } while (0)
 
 static void keccak64_8way_init( keccak64_ctx_m512i *kc, unsigned out_size )
@@ -238,6 +314,10 @@ void keccak512_8x64_ctx( void *cc, void *dst, const void *data, size_t len )
    keccak512_8x64_close( cc, dst );
 }
 
+// 8-lane sha3t; see SHA3T_PREPAD_FN above.
+SHA3T_PREPAD_FN( sha3t_8x64_prepad, __m512i, keccak64_ctx_m512i,
+                 m512_zero, m512_neg1, _mm512_set1_epi64, _mm512_xor_si512 )
+
 #undef INPUT_BUF
 #undef DECL64
 #undef XOR64
@@ -276,6 +356,10 @@ void keccak512_8x64_ctx( void *cc, void *dst, const void *data, size_t len )
 
 #define KECCAK_F_1600   DO(KECCAK_F_1600_256)
 
+// NOTE: Deliberately still a loop, unlike the 8-way above. Unrolling measured a
+// LOSS here: -6.2% AVX2, -5.1% SSE2, against +3.4% AVX-512. These have 16
+// vector registers to the 8-way's 32 and already spill a 25-lane state, so the
+// bigger scheduling region costs more than the loop overhead. Don't "fix" it.
 #define KECCAK_F_1600_256   do { \
     int j; \
     for (j = 0; j < 24; j += 8) \
@@ -434,6 +518,10 @@ void keccak512_4x64_ctx( void *cc, void *dst, const void *data, size_t len )
    keccak512_4x64_close( cc, dst );
 }
 
+// 4-lane sha3t; see SHA3T_PREPAD_FN above.
+SHA3T_PREPAD_FN( sha3t_4x64_prepad, __m256i, keccak64_ctx_m256i,
+                 m256_zero, m256_neg1, _mm256_set1_epi64x, _mm256_xor_si256 )
+
 #undef INPUT_BUF
 #undef DECL64
 #undef XOR64
@@ -473,6 +561,9 @@ void keccak512_4x64_ctx( void *cc, void *dst, const void *data, size_t len )
 
 #define KECCAK_F_1600   DO(KECCAK_F_1600_256)
 
+// NOTE: Still a loop, same measured reason as the 4-way above (-5.1% unrolled).
+// Also the aarch64/NEON path, which has 32 registers and might behave like the
+// 8-way -- but that has never been measured on ARM, so it stays.
 #define KECCAK_F_1600_256   do { \
     int j; \
     for (j = 0; j < 24; j += 8) \
@@ -633,6 +724,11 @@ void keccak512_2x64_ctx( void *cc, void *dst, const void *data, size_t len )
    keccak512_2x64_update( cc, data, len );
    keccak512_2x64_close( cc, dst );
 }
+
+// 2-lane sha3t; see SHA3T_PREPAD_FN above. Also the aarch64/NEON path, but
+// sha3t only selects 2x64 on ARM under FEAT_SHA3 (keccak-gate.h).
+SHA3T_PREPAD_FN( sha3t_2x64_prepad, v128_t, keccak64_ctx_v128,
+                 v128_zero, v128_neg1, v128_64, v128_xor )
 
 
 #undef INPUT_BUF
