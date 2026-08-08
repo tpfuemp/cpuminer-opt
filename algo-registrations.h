@@ -30,6 +30,7 @@ bool register_blake2s_algo( algo_gate_t *gate );
 bool register_blakecoin_algo( algo_gate_t *gate );
 bool register_bmw512_algo( algo_gate_t *gate );
 bool register_c11_algo( algo_gate_t *gate );
+bool register_curvehash_algo( algo_gate_t *gate );
 bool register_deep_algo( algo_gate_t *gate );
 bool register_dmd_gr_algo( algo_gate_t *gate );
 bool register_equihash_algo( algo_gate_t *gate );

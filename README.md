@@ -70,6 +70,7 @@ Supported Algorithms
                           bmw           BMW 256
                           bmw512        BMW 512
                           c11           
+                          curvehash     Pulsar (PLSR), alias curve
                           decred
                           deep          Deepcoin (DCN)
                           dmd-gr        Diamond-Groestl
@@ -224,11 +225,12 @@ Donations
 
 cpuminer-opt has no fees of any kind but donations are accepted.
 
-Upstream cpuminer-opt (Jay D Dee):
+Jay D Dee (maintainer):
 
  BTC: 12tdvfF7KmAsihBXQXynT6E6th2c2pByTT
 
-This fork (tpfuemp) — ghostrider, sha256dv, equihash and other additions:
+tpfuemp (argon2id1024, balloon, curvehash, equihash, flex, ghostrider,
+hoohashv110, odo, sha256dv, sha3t, skydoge and verus additions):
 
  DOGE: DNQdyeLu9DtRfsZCFvy1GfJTwjWJoSWHLh
 

@@ -308,6 +308,7 @@ case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_BLAKECOIN:    rc = register_blakecoin_algo     ( gate ); break;
     case ALGO_BMW512:       rc = register_bmw512_algo        ( gate ); break;
     case ALGO_C11:          rc = register_c11_algo           ( gate ); break;
+    case ALGO_CURVEHASH:    rc = register_curvehash_algo     ( gate ); break;
     case ALGO_DEEP:         rc = register_deep_algo          ( gate ); break;
     case ALGO_DMD_GR:       rc = register_dmd_gr_algo        ( gate ); break;
     case ALGO_EQUIHASH:     rc = register_equihash_algo      ( gate ); break;
@@ -436,6 +437,7 @@ const char* const algo_alias_map[][2] =
   { "blake256r8",        "blakecoin"      },
   { "blake256r8vnl",     "vanilla"        },
   { "blake256r14",       "blake"          },
+  { "curve",             "curvehash"      },
   { "diamond",           "dmd-gr"         },
   { "espers",            "hmq1725"        },
   { "flax",              "c11"            },

@@ -35,6 +35,26 @@ bin_PROGRAMS = cpuminer
 
 dist_man_MANS = cpuminer.1
 
+# curvehash's PoW *is* libsecp256k1, vendored under algo/curvehash/secp256k1 and
+# compiled as a single TU. It lives in its own convenience library for two
+# reasons, both scoping:
+#   - the library's internal #include "include/secp256k1.h" only resolves from
+#     the library root, and that -I has no business on every other TU's command
+#     line;
+#   - a 2015-vintage C89 library trips -Wall on current compilers (36
+#     nonnull-compare from its own ARG_CHECK macros, 4 unused-function inherent
+#     to a unity build). Those are suppressed here, per-object, so the rest of
+#     the tree keeps them. Do NOT suppress them tree-wide and do NOT edit the
+#     vendored source -- that is an upstream-sync trap.
+# -Wno-unknown-warning-option comes first because -Wnonnull-compare is GCC-only;
+# clang needs it to stay quiet, and GCC ignores it. Verified 0 warnings on both.
+noinst_LIBRARIES = libcurvehash_secp256k1.a
+libcurvehash_secp256k1_a_SOURCES = algo/curvehash/secp256k1_unity.c
+libcurvehash_secp256k1_a_CPPFLAGS = $(ALL_INCLUDES) \
+  -I$(top_srcdir)/algo/curvehash/secp256k1
+libcurvehash_secp256k1_a_CFLAGS = $(disable_flags) \
+  -Wno-unknown-warning-option -Wno-nonnull-compare -Wno-unused-function
+
 cpuminer_SOURCES = \
   dummy.cpp \
   cpu-miner.c \
@@ -83,6 +103,7 @@ cpuminer_SOURCES = \
   algo/cubehash/cubehash_sse2.c\
   algo/cubehash/cube-hash-2way.c \
   algo/cubehash/sph_cubehash.c \
+  algo/curvehash/curvehash-gate.c \
   algo/equihash/equihash.c \
   algo/equihash/equihash-ref.c \
   algo/equihash/equihash-simd.c \
@@ -347,7 +368,7 @@ else
 endif
 
 cpuminer_LDFLAGS = @LDFLAGS@
-cpuminer_LDADD	= $(EXTRA_LIBS) @LIBCURL@ -ljansson @PTHREAD_LIBS@ @WS2_LIBS@ -lgmp
+cpuminer_LDADD	= libcurvehash_secp256k1.a $(EXTRA_LIBS) @LIBCURL@ -ljansson @PTHREAD_LIBS@ @WS2_LIBS@ -lgmp
 cpuminer_CPPFLAGS = @LIBCURL_CPPFLAGS@ $(ALL_INCLUDES)
 cpuminer_CFLAGS = -Wno-pointer-sign -Wno-pointer-to-int-cast $(disable_flags)
 

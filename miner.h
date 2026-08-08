@@ -642,7 +642,8 @@ enum algos {
         ALGO_BLAKECOIN,
         ALGO_BMW,        
         ALGO_BMW512,
-        ALGO_C11,         
+        ALGO_C11,
+        ALGO_CURVEHASH,      /* Pulsar (PLSR) — secp256k1 chain     */
         ALGO_DEEP,
         ALGO_DMD_GR,
         ALGO_EQUIHASH,       /* 200/9 — ZCash, Horizen, Komodo     */
@@ -755,6 +756,7 @@ static const char* const algo_names[] = {
         "bmw",
         "bmw512",
         "c11",
+        "curvehash",
         "deep",
         "dmd-gr",
         "equihash",
@@ -932,6 +934,7 @@ Options:\n\
                           bmw           BMW 256\n\
                           bmw512        BMW 512\n\
                           c11           Chaincoin\n\
+                          curvehash     Pulsar (PLSR), alias curve\n\
                           deep          Deepcoin (DCN)\n\
                           dmd-gr        Diamond\n\
                           equihash      Zcash/ZEC, Horizen/ZEN, Komodo/KMD (200/9, ~210 MB)\n\

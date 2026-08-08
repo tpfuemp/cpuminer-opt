@@ -2,6 +2,7 @@ minerd*
 cpuminer
 *.exe
 *.o
+*.a
 *.d
 gmon.out
 
