@@ -102,89 +102,12 @@
 #include <sys/mman.h>
 #endif
 
-#define HUGEPAGE_THRESHOLD      (12 * 1024 * 1024)
-
-#ifdef __x86_64__
-#define HUGEPAGE_SIZE           (2 * 1024 * 1024)
-#else
-#undef HUGEPAGE_SIZE
-#endif
-
-static void *alloc_region(yespower_region_t *region, size_t size)
-{
-    size_t base_size = size;
-    uint8_t *base, *aligned;
-#ifdef MAP_ANON
-    int flags =
-#ifdef MAP_NOCORE
-        MAP_NOCORE |
-#endif
-        MAP_ANON | MAP_PRIVATE;
-#if defined(MAP_HUGETLB) && defined(HUGEPAGE_SIZE)
-    size_t new_size = size;
-    const size_t hugepage_mask = (size_t)HUGEPAGE_SIZE - 1;
-    if (size >= HUGEPAGE_THRESHOLD && size + hugepage_mask >= size) {
-        flags |= MAP_HUGETLB;
-/*
- * Linux's munmap() fails on MAP_HUGETLB mappings if size is not a multiple of
- * huge page size, so let's round up to huge page size here.
- */
-        new_size = size + hugepage_mask;
-        new_size &= ~hugepage_mask;
-    }
-    base = mmap(NULL, new_size, PROT_READ | PROT_WRITE, flags, -1, 0);
-    if (base != MAP_FAILED) {
-        base_size = new_size;
-    } else if (flags & MAP_HUGETLB) {
-        flags &= ~MAP_HUGETLB;
-        base = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
-    }
-
-#else
-    base = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
-#endif
-    if (base == MAP_FAILED)
-        base = NULL;
-    aligned = base;
-#elif defined(HAVE_POSIX_MEMALIGN)
-    if ((errno = posix_memalign((void **)&base, 64, size)) != 0)
-        base = NULL;
-    aligned = base;
-#else
-    base = aligned = NULL;
-    if (size + 63 < size) {
-        errno = ENOMEM;
-    } else if ((base = malloc(size + 63)) != NULL) {
-        aligned = base + 63;
-        aligned -= (uintptr_t)aligned & 63;
-    }
-#endif
-    region->base = base;
-    region->aligned = aligned;
-    region->base_size = base ? base_size : 0;
-    region->aligned_size = base ? size : 0;
-    return aligned;
-}
-
-static inline void init_region(yespower_region_t *region)
-{
-    region->base = region->aligned = NULL;
-    region->base_size = region->aligned_size = 0;
-}
-
-static int free_region(yespower_region_t *region)
-{
-    if (region->base) {
-#ifdef MAP_ANON
-        if (munmap(region->base, region->base_size))
-            return -1;
-#else
-        free(region->base);
-#endif
-    }
-    init_region(region);
-    return 0;
-}
+/* The region allocator was a verbatim copy of yespower-platform.c's and had
+ * silently missed every fix the shared one received. Include it instead of
+ * re-copying: the functions are static, so this TU still gets its own copy.
+ * Kept inside the pass-1 section so the pass-2 self-include below does not
+ * redefine them. */
+#include "yespower-platform.c"
 
 #if __STDC_VERSION__ >= 199901L
 /* Have restrict */
@@ -202,8 +125,13 @@ static int free_region(yespower_region_t *region)
 #endif
 */
 
-#ifdef __SSE__
+#if defined(__SSE__)
 #define PREFETCH(x, hint) _mm_prefetch((const char *)(x), (hint));
+#elif defined(__aarch64__) && !defined(YP_NO_ARM_PREFETCH)
+/* Same gap and same fix as yespower-opt.c. Used on the v1.0 pass ONLY: these
+ * variants are v1.0 in practice, but the v0.5 pass still exists in this file
+ * and on the sibling it costs up to 1.9x. Do not widen without measuring. */
+#define PREFETCH(x, hint) __builtin_prefetch((const void *)(x), 0, 3);
 #else
 #undef PREFETCH
 #endif
@@ -820,7 +748,8 @@ static uint32_t blockmix_xor(const salsa20_blk_t *restrict Bin1,
     /* Convert count of 128-byte blocks to max index of 64-byte block */
     r = r * 2 - 1;
 
-#ifdef PREFETCH
+/* aarch64: v1.0 pass only -- see the PREFETCH definition. */
+#if defined(PREFETCH) && ( !defined(__aarch64__) || _YESPOWER_OPT_C_PASS_ > 1 )
     PREFETCH(&Bin2[r], _MM_HINT_T0)
     for (i = 0; i < r; i++) {
         PREFETCH(&Bin2[i], _MM_HINT_T0)
@@ -878,7 +807,8 @@ static uint32_t blockmix_xor_save(salsa20_blk_t *restrict Bin1out,
     /* Convert count of 128-byte blocks to max index of 64-byte block */
     r = r * 2 - 1;
 
-#ifdef PREFETCH
+/* aarch64: v1.0 pass only -- see the PREFETCH definition. */
+#if defined(PREFETCH) && ( !defined(__aarch64__) || _YESPOWER_OPT_C_PASS_ > 1 )
     PREFETCH(&Bin2[r], _MM_HINT_T0)
     for (i = 0; i < r; i++) {
         PREFETCH(&Bin2[i], _MM_HINT_T0)

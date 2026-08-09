@@ -42,6 +42,14 @@
 
 #include "simd-utils.h"
 
+/* Enable this file's AVX-512 path (salsa shuffle via _mm512_permutexvar_epi32,
+ * ternlog XORs). The macro was previously defined nowhere, so the code was
+ * dead in every build. Bit-exact; worth ~1.5% on the small-r variants and
+ * nothing on the large ones. -DYP_NO_AVX512 reverts. */
+#if defined(SIMD512) && !defined(YP_NO_AVX512)
+#define YESPOWER_USE_AVX512 1
+#endif
+
 #ifndef _YESPOWER_OPT_C_PASS_
 #define _YESPOWER_OPT_C_PASS_ 1
 #endif
@@ -77,11 +85,21 @@
 #define restrict
 #endif
 
-#ifdef __SSE__
+#if defined(__SSE__)
 #define PREFETCH(x, hint) _mm_prefetch((const char *)(x), (hint));
+#elif defined(__aarch64__) && !defined(YP_NO_ARM_PREFETCH)
+/* Upstream gates PREFETCH on __SSE__ alone, so aarch64 lost both of blockmix's
+ * prefetches. `hint` is never expanded, so _MM_HINT_T0 not existing here is
+ * fine. Used on the v1.0 pass ONLY: on v0.5 it is a large loss that grows with
+ * r, up to ~1.9x on yescryptr32. Worth ~8% on one isolated core and less
+ * device-wide. The pass test lives at the use sites, since this block sits in
+ * the `_YESPOWER_OPT_C_PASS_ == 1` section and so is only ever seen with the
+ * pass fixed at 1, while the use sites compile twice. */
+#define PREFETCH(x, hint) __builtin_prefetch((const void *)(x), 0, 3);
 #else
 #undef PREFETCH
 #endif
+
 
 typedef union
 {
@@ -711,7 +729,8 @@ static uint32_t blockmix_xor( const salsa20_blk_t *restrict Bin1,
 	/* Convert count of 128-byte blocks to max index of 64-byte block */
 	r = r * 2 - 1;
 
-#ifdef PREFETCH
+/* aarch64: v1.0 pass only; on v0.5 these cost up to 1.9x. */
+#if defined(PREFETCH) && ( !defined(__aarch64__) || _YESPOWER_OPT_C_PASS_ > 1 )
 	PREFETCH(&Bin2[r], _MM_HINT_T0)
 	for (i = 0; i < r; i++) {
 		PREFETCH(&Bin2[i], _MM_HINT_T0)
@@ -765,7 +784,8 @@ static uint32_t blockmix_xor_save( salsa20_blk_t *restrict Bin1out,
 	/* Convert count of 128-byte blocks to max index of 64-byte block */
 	r = r * 2 - 1;
 
-#ifdef PREFETCH
+/* aarch64: v1.0 pass only; on v0.5 these cost up to 1.9x. */
+#if defined(PREFETCH) && ( !defined(__aarch64__) || _YESPOWER_OPT_C_PASS_ > 1 )
 	PREFETCH(&Bin2[r], _MM_HINT_T0)
 	for (i = 0; i < r; i++) {
 		PREFETCH(&Bin2[i], _MM_HINT_T0)
@@ -864,6 +884,11 @@ static void smix1(uint8_t *B, size_t r, uint32_t N,
 		uint32_t m = (n < N / 2) ? n : (N - 1 - n);
 		for (i = 1; i < m; i += 2) {
 			Y = X + s;
+			/* Do not add a prefetch here. This is not a sequential fill:
+			 * the V[j] read is pseudo-random, already prefetched inside
+			 * blockmix_xor, and its index is that call's return value. Only
+			 * the output block is known ahead, and prefetching it for write
+			 * measured a loss on both arches (x86 and aarch64, every variant). */
 			j &= n - 1;
 			j += i - 1;
 			V_j = &V[j * s];
@@ -1092,6 +1117,13 @@ int yespower(yespower_local_t *local,
 
       if ( work_restart[thrid].restart ) return 0;
 
+      /* CONSENSUS. Do not "fix" this into `if (pers) { ... }`. With
+       * pers == NULL, src/srclen are still the 80-byte header, so this
+       * personalizes with the header itself -- upstream's BSTY convention, and
+       * what `-a yescrypt` has always computed. Gating it on `pers` matches
+       * upstream's unpersonalized test vector and yespower-ref.c, and a live
+       * pool rejects every share. The reference is therefore NOT a valid
+       * oracle for v0.5 + pers == NULL; yespower-kat.h pins the real digest. */
       if ( pers )
       {
          src = pers;
@@ -1100,7 +1132,6 @@ int yespower(yespower_local_t *local,
 
       HMAC_SHA256_Buf( dst, sizeof(*dst), src, srclen, sha256 );
       SHA256_Buf( sha256, sizeof(sha256), (uint8_t *)dst );
-      
    }
    else
    {
