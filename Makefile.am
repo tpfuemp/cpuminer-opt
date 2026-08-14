@@ -48,8 +48,13 @@ dist_man_MANS = cpuminer.1
 #     vendored source -- that is an upstream-sync trap.
 # -Wno-unknown-warning-option comes first because -Wnonnull-compare is GCC-only;
 # clang needs it to stay quiet, and GCC ignores it. Verified 0 warnings on both.
+# curvehash-kernel.c is the extracted k*G subset -- the file mining actually
+# runs. It includes the same vendored headers, so it needs the same scoped -I
+# and the same -Wno-, and therefore belongs in this library rather than in
+# cpuminer_SOURCES.
 noinst_LIBRARIES = libcurvehash_secp256k1.a
-libcurvehash_secp256k1_a_SOURCES = algo/curvehash/secp256k1_unity.c
+libcurvehash_secp256k1_a_SOURCES = algo/curvehash/secp256k1_unity.c \
+  algo/curvehash/curvehash-kernel.c
 libcurvehash_secp256k1_a_CPPFLAGS = $(ALL_INCLUDES) \
   -I$(top_srcdir)/algo/curvehash/secp256k1
 libcurvehash_secp256k1_a_CFLAGS = $(disable_flags) \

@@ -17,6 +17,12 @@
  * that nonce, never submit a fabricated digest. */
 bool curvehash_hash( void *output, const void *input );
 
+/* CURVEHASH_LANES nonces in lockstep so their inversions batch. Bits of *active
+ * mark live lanes on entry and are cleared for any lane whose scalar turned out
+ * invalid; a cleared lane's digest is meaningless. */
+void curvehash_hash_batch( unsigned char out[][32], const unsigned char in[][80],
+                           int lanes, uint32_t *active );
+
 /* NULL on success, else the name of the failed check. */
 const char *curvehash_self_test( void );
 
