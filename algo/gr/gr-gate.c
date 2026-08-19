@@ -363,6 +363,14 @@ int scanhash_gr( struct work *work, uint32_t max_nonce, uint64_t *hashes_done,
    return 0;
 }
 
+/* GhostRider's three CryptoNight scratchpads are 2 MiB each and may be huge
+ * pages or mmap; cryptonight_free_scratchpad() knows which. */
+static void gr_thread_free( int thr_id )
+{
+   (void)thr_id;
+   cryptonight_free_scratchpad();
+}
+
 bool register_gr_algo( algo_gate_t *gate )
 {
    if ( !gr_self_test() )
@@ -371,6 +379,7 @@ bool register_gr_algo( algo_gate_t *gate )
       return false;
    }
    gate->scanhash     = (void*)&scanhash_gr;
+gate->miner_thread_free = (void*)&gr_thread_free;
    gate->optimizations = SSE2_OPT | AES_OPT | AVX2_OPT | NEON_OPT;
    opt_target_factor  = 65536.0;
    return true;

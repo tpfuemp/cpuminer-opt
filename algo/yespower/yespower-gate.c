@@ -327,6 +327,15 @@ int scanhash_yespower_b2b( struct work *work, uint32_t max_nonce,
    return 0;
 }
 
+/* Every yespower/yescrypt variant shares one thread-local region, sized by the
+ * variant (2 MB yescrypt to 16 MB yescryptr32), so one free serves all eight
+ * registrations below. */
+static void yespower_gate_thread_free( int thr_id )
+{
+   (void)thr_id;
+   yespower_tls_free();
+}
+
 bool register_yespower_algo( algo_gate_t* gate )
 {
   yespower_params.version = YESPOWER_1_0;
@@ -355,6 +364,7 @@ bool register_yespower_algo( algo_gate_t* gate )
 
   gate->optimizations = SSE2_OPT | SHA256_OPT | NEON_OPT;
   gate->scanhash      = (void*)&scanhash_yespower;
+  gate->miner_thread_free = (void*)&yespower_gate_thread_free;
 #if (__SSE2__) || defined(__aarch64__)
   gate->hash          = (void*)&yespower_hash;
 #else
@@ -373,6 +383,7 @@ bool register_yespowerr16_algo( algo_gate_t* gate )
   yespower_params.perslen = 0;
   gate->optimizations     = SSE2_OPT | SHA256_OPT | NEON_OPT;
   gate->scanhash          = (void*)&scanhash_yespower;
+  gate->miner_thread_free = (void*)&yespower_gate_thread_free;
 #if (__SSE2__) || defined(__aarch64__)
   gate->hash              = (void*)&yespower_hash;
 #else
@@ -388,6 +399,7 @@ bool register_yescrypt_algo( algo_gate_t* gate )
 {
    gate->optimizations = SSE2_OPT | SHA256_OPT | NEON_OPT;
    gate->scanhash   = (void*)&scanhash_yespower;
+   gate->miner_thread_free = (void*)&yespower_gate_thread_free;
 #if (__SSE2__) || defined(__aarch64__)
    gate->hash       = (void*)&yespower_hash;
 #else
@@ -426,6 +438,7 @@ bool register_yescryptr8_algo( algo_gate_t* gate )
 {
    gate->optimizations = SSE2_OPT | SHA256_OPT | NEON_OPT;
    gate->scanhash      = (void*)&scanhash_yespower;
+   gate->miner_thread_free = (void*)&yespower_gate_thread_free;
 #if (__SSE2__) || defined(__aarch64__)
    gate->hash          = (void*)&yespower_hash;
 #else
@@ -444,6 +457,7 @@ bool register_yescryptr16_algo( algo_gate_t* gate )
 {
    gate->optimizations = SSE2_OPT | SHA256_OPT | NEON_OPT;
    gate->scanhash   = (void*)&scanhash_yespower;
+   gate->miner_thread_free = (void*)&yespower_gate_thread_free;
 #if (__SSE2__) || defined(__aarch64__)
    gate->hash          = (void*)&yespower_hash;
 #else
@@ -462,6 +476,7 @@ bool register_yescryptr32_algo( algo_gate_t* gate )
 {
    gate->optimizations = SSE2_OPT | SHA256_OPT | NEON_OPT;
    gate->scanhash   = (void*)&scanhash_yespower;
+   gate->miner_thread_free = (void*)&yespower_gate_thread_free;
 #if (__SSE2__) || defined(__aarch64__)
    gate->hash          = (void*)&yespower_hash;
 #else
@@ -494,6 +509,7 @@ bool register_power2b_algo( algo_gate_t* gate )
 
   gate->optimizations = SSE2_OPT | AVX2_OPT | NEON_OPT;
   gate->scanhash      = (void*)&scanhash_yespower_b2b;
+  gate->miner_thread_free = (void*)&yespower_gate_thread_free;
 #if (__SSE2__) || defined(__aarch64__)
   gate->hash          = (void*)&yespower_b2b_hash;
 #else
@@ -538,6 +554,7 @@ bool register_yespower_b2b_algo( algo_gate_t* gate )
 
   gate->optimizations = SSE2_OPT | AVX2_OPT | NEON_OPT;
   gate->scanhash      = (void*)&scanhash_yespower_b2b;
+  gate->miner_thread_free = (void*)&yespower_gate_thread_free;
 #if (__SSE2__) || defined(__aarch64__)
   gate->hash          = (void*)&yespower_b2b_hash;
 #else

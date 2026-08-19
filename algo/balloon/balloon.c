@@ -369,6 +369,19 @@ balloon_ctx *balloon_thread_ctx( void )
    return tl_ctx;
 }
 
+/* Release this thread's context. The index table inside it is consensus state
+ * keyed on the salt, so dropping it is always safe: the next hash rebuilds it.
+ * Idempotent, and the ctx is lazily reallocated on the next call above.     */
+void balloon_thread_ctx_free( void )
+{
+#if defined(_WIN32)
+   _aligned_free( tl_ctx );      /* posix_memalign is mapped to _aligned_malloc */
+#else
+   free( tl_ctx );
+#endif
+   tl_ctx = NULL;
+}
+
 /* ── Self-test ────────────────────────────────────────────────────────────
  *
  * Checked from the innermost primitive outwards so a failure localises: the

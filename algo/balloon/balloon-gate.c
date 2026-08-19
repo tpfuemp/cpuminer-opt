@@ -88,6 +88,13 @@ int scanhash_balloon( struct work *work, uint32_t max_nonce,
    return 0;
 }
 
+/* The gate hands the thread id; the context is __thread, so it is implicit. */
+static void balloon_gate_thread_free( int thr_id )
+{
+   (void)thr_id;
+   balloon_thread_ctx_free();
+}
+
 bool register_balloon_algo( algo_gate_t *gate )
 {
    const char *failed = balloon_self_test();
@@ -98,6 +105,7 @@ bool register_balloon_algo( algo_gate_t *gate )
    }
 
    gate->scanhash = (void*)&scanhash_balloon;
+   gate->miner_thread_free = (void*)&balloon_gate_thread_free;
 
    /* Nothing here is hand-vectorized. Whether SHA-NI or ARMv8 SHA2 is used is
     * decided inside sha256_full at compile time, so it is not claimed here. */

@@ -136,6 +136,7 @@ static inline void balloon_ctx_reset( balloon_ctx *ctx )
  * allocation failed, which the caller must treat as "cannot hash" rather than
  * carry on with.                                                            */
 balloon_ctx *balloon_thread_ctx( void );
+void         balloon_thread_ctx_free( void );
 
 /* 80-byte header in, 32-byte digest out. Named for the input rather than just
  * `balloon_hash`, which other implementations export with a different

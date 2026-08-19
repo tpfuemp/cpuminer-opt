@@ -176,6 +176,11 @@ uint64_t available_system_memory(void)
 #include "miner.h"
 #include "algo-gate-api.h"
 #include "algo/sha/sha256-hash.h"
+#include "api_model.h"   // api_history_add(), called when a scan returns
+#include "api_control.h" // api_ctl_thread_should_run(), the parking protocol
+#if defined(__GLIBC__)
+#include <malloc.h>   // malloc_trim() after releasing algo buffers
+#endif
 
 #ifdef WIN32
 #include "compat/winansi.h"
@@ -323,7 +328,13 @@ char *opt_api_allow = NULL;
 int opt_api_listen = 0;
 int opt_api_remote = 0;
 const char *default_api_allow = "127.0.0.1";
-int default_api_listen = 4048; 
+int default_api_listen = 4048;
+// REST API (docs/api-rest.md section 2). Default binary, so an upgrade changes
+// nothing about how the port behaves.
+int   opt_api_mode      = API_MODE_BINARY;
+char *opt_api_token     = NULL;
+char *opt_api_cors      = NULL;
+int   opt_api_http_port = 0;
 
   pthread_mutex_t applog_lock;
   pthread_mutex_t stats_lock;
@@ -341,6 +352,12 @@ static uint32_t last_block_height = 0;
 static double   highest_share = 0;   // highest accepted share diff
 static double   lowest_share = 9e99; // lowest accepted share diff
 static double   last_targetdiff = 0.;
+
+// The REST API reports this as difficulty.best_share. An accessor rather than
+// un-static-ing the counter: api_model.c is a second TU, and putting a name
+// this generic into the link namespace is how collisions start.
+double api_get_best_share( void ) { return highest_share; }
+
 #if !(defined(__WINDOWS__) || defined(_WIN64) || defined(_WIN32) || defined(__APPLE__))
 static uint32_t hi_temp = 0;
 static uint32_t prev_temp = 0;
@@ -1104,9 +1121,36 @@ const long double exp96  = EXP32 * EXP32 * EXP32;                 // 2**96
 const long double exp128 = EXP32 * EXP32 * EXP32 * EXP32;         // 2**128
 const long double exp160 = EXP32 * EXP32 * EXP32 * EXP32 * EXP16; // 2**160
 
+// Per-thread share attribution. The pool answers long after the submitting
+// thread has moved on, so the thread id rides along in the share_stats ring
+// and is credited when the reply arrives. Read by the REST API
+// (threads[].accepted / .rejected); guarded by stats_lock.
+struct thr_shares { uint32_t accepted; uint32_t rejected; uint32_t submitted; };
+static struct thr_shares *thr_share_counts = NULL;
+
+// Unintentional pool disconnects only: a reset requested by seturl or by the
+// REST API is not a fault and must not show up in pool-health alerting.
+// Counted where the connection actually failed, not in the reset handler that
+// serves both cases.
+static uint32_t pool_disconnect_count = 0;
+
+uint32_t api_get_pool_disconnects( void ) { return pool_disconnect_count; }
+
+bool api_get_thread_shares( int thr_id, uint32_t *accepted, uint32_t *rejected )
+{
+   if ( !thr_share_counts || thr_id < 0 || thr_id >= opt_n_threads )
+      return false;
+   pthread_mutex_lock( &stats_lock );
+   *accepted = thr_share_counts[ thr_id ].accepted;
+   *rejected = thr_share_counts[ thr_id ].rejected;
+   pthread_mutex_unlock( &stats_lock );
+   return true;
+}
+
 struct share_stats_t
 {
    int share_count;
+   int thr_id;
    struct timeval submit_time;
    double net_diff;
    double share_diff;
@@ -1400,6 +1444,17 @@ static int share_result( int result, struct work *work,
 
    // update global counters for summary report
    pthread_mutex_lock( &stats_lock );
+
+   // Credit the thread that submitted this share. Only when the ring actually
+   // had the record: on overflow my_stats is zeroed, and thr_id 0 would then
+   // be a wrong answer rather than a missing one. A stale share is counted
+   // neither accepted nor rejected here, matching the global counters.
+   if ( thr_share_counts && my_stats.submit_time.tv_sec
+        && my_stats.thr_id >= 0 && my_stats.thr_id < opt_n_threads )
+   {
+      if ( result )      thr_share_counts[ my_stats.thr_id ].accepted++;
+      else if ( !stale ) thr_share_counts[ my_stats.thr_id ].rejected++;
+   }
 
    for ( int i = 0; i < opt_n_threads; i++ )
        hashrate += thr_hashrates[i];
@@ -2010,12 +2065,16 @@ err_out:
 	return false;
 }
 
-static void update_submit_stats( struct work *work, const void *hash )
+static void update_submit_stats( struct work *work, const void *hash,
+                                 int thr_id )
 {
    pthread_mutex_lock( &stats_lock );
 
    submitted_share_count++;
    share_stats[ s_put_ptr ].share_count = submitted_share_count;
+   share_stats[ s_put_ptr ].thr_id = thr_id;
+   if ( thr_share_counts && thr_id >= 0 && thr_id < opt_n_threads )
+      thr_share_counts[ thr_id ].submitted++;
    gettimeofday( &share_stats[ s_put_ptr ].submit_time, NULL );
    share_stats[ s_put_ptr ].share_diff = work->sharediff;
    share_stats[ s_put_ptr ].net_diff = net_diff;
@@ -2041,7 +2100,7 @@ bool submit_solution( struct work *work, const void *hash,
    if ( work->veil_sha256dv )
    {
       work->sharediff = hash_to_diff( hash );
-      update_submit_stats( work, hash );
+      update_submit_stats( work, hash, thr->id );
 
       char req[JSON_BUF_LEN];
       veil_sha256dv_build_stratum_request( req, work );
@@ -2068,7 +2127,7 @@ bool submit_solution( struct work *work, const void *hash,
    work->sharediff = hash_to_diff( hash ) * opt_target_factor;
    if ( likely( submit_work( thr, work ) ) )
    {
-     update_submit_stats( work, hash );
+     update_submit_stats( work, hash, thr->id );
 
      if unlikely( !have_stratum && !have_longpoll )
      {   // solo, block solved, force getwork
@@ -2560,6 +2619,23 @@ static void *miner_thread( void *userdata )
        pthread_rwlock_unlock( &g_work_lock );
 
        // conditional mining
+       // Parked by the control API: report the thread as idle and poll. The
+       // acknowledgement IS the call -- api_ctl_thread_should_run() records
+       // that this thread has stopped hashing, which is what a mutation waits
+       // for. Separate from wanna_mine() below on purpose: that one is the
+       // temperature/difficulty gate, and a manager-requested stop is not a
+       // fault (docs/api-rest.md section 6.6).
+       if ( unlikely( !api_ctl_thread_should_run( thr_id ) ) )
+       {
+          // Free and re-allocate this thread's algo buffers while parked: they
+          // are __thread, so only this thread can do it, and the control layer
+          // sequences the two phases around the gate swap.
+          api_ctl_thread_service( thr_id );
+          thr_hashrates[thr_id] = 0.;
+          usleep( 100000 );
+          continue;
+       }
+
        if ( unlikely( !wanna_mine( thr_id ) ) )
        {
           restart_threads();
@@ -2615,6 +2691,11 @@ static void *miner_thread( void *userdata )
        hashes_done = 0;
        gettimeofday( (struct timeval *) &tv_start, NULL );
 
+       // A share is submitted from inside scanhash, so the only way this loop
+       // can tell whether the scan found one is to watch its own counter.
+       uint32_t submitted_before = thr_share_counts
+                                 ? thr_share_counts[thr_id].submitted : 0;
+
        // Scan for nonce
        nonce_found = algo_gate.scanhash( &work, max_nonce, &hashes_done,
                                          mythr );
@@ -2631,6 +2712,51 @@ static void *miner_thread( void *userdata )
           hashes_done / ( diff.tv_sec + diff.tv_usec * 1e-6 );
           pthread_mutex_unlock( &stats_lock );
        }
+
+#ifdef API_DEV_FREETEST
+       // TEST SCAFFOLD, not shipped. Simulates what a runtime algo switch will
+       // do to each thread -- free, then reallocate -- so a missing or wrong
+       // miner_thread_free shows up as RSS climbing instead of staying flat.
+       {
+          static __thread int cycles = 0;
+          // Same binary does control and treatment: without the cycling, RSS
+          // still climbs as pages are first touched, and that would read as a
+          // leak. FREETEST=0 measures that baseline.
+          static __thread int enabled = -1;
+          if ( enabled < 0 )
+          {
+             const char *e = getenv( "FREETEST" );
+             enabled = ( !e || *e != '0' );
+          }
+          if ( ++cycles % 4 == 0 )
+          {
+             if ( enabled )
+             {
+                algo_gate.miner_thread_free( thr_id );
+#if defined(__GLIBC__)
+                if ( getenv( "FREETRIM" ) ) malloc_trim( 0 );
+#endif
+                if ( !algo_gate.miner_thread_init( thr_id ) )
+                   applog( LOG_ERR, "freetest: re-init failed on thread %d", thr_id );
+             }
+             if ( thr_id == 0 )
+             {
+                FILE *f = fopen( "/proc/self/status", "r" );
+                char l[128];
+                while ( f && fgets( l, sizeof(l), f ) )
+                   if ( !strncmp( l, "VmRSS:", 6 ) )
+                   { applog( LOG_NOTICE, "freetest cycle %d %s", cycles, l ); break; }
+                if ( f ) fclose( f );
+             }
+          }
+       }
+#endif
+
+       // One record per scan for GET /api/v1/history.
+       api_history_add( thr_id, work.height, thr_hashrates[thr_id],
+                        work.targetdiff * opt_target_factor, hashes_done,
+                        thr_share_counts
+                        && thr_share_counts[thr_id].submitted != submitted_before );
 
        // This code is deprecated, scanhash should never return true.
        // This remains as a backup in case some old implementations still exist.
@@ -2717,6 +2843,9 @@ static void *miner_thread( void *userdata )
    }  // miner_thread loop
 
 out:
+	// Release this thread's algo buffers on the thread that owns them: they
+	// are __thread pointers, so no other thread can reach them.
+	algo_gate.miner_thread_free( thr_id );
 	tq_freeze(mythr->q);
 	return NULL;
 }
@@ -3065,12 +3194,14 @@ static void *stratum_thread(void *userdata )
          {
 //            applog(LOG_WARNING, "Stratum connection interrupted");
 //            stratum_disconnect( &stratum );
+            pool_disconnect_count++;
             stratum_need_reset = true;
          }
       }
       else
       {
          applog(LOG_ERR, "Stratum connection timeout");
+         pool_disconnect_count++;
          stratum_need_reset = true;
 //         stratum_disconnect( &stratum );
       }
@@ -3414,6 +3545,43 @@ void parse_arg(int key, char *arg )
       break;
 	case 1030: // api-remote
 		opt_api_remote = 1;
+		break;
+	case 1063: // api-mode
+		if      ( !strcasecmp( arg, "binary" ) ) opt_api_mode = API_MODE_BINARY;
+		else if ( !strcasecmp( arg, "http" ) )   opt_api_mode = API_MODE_HTTP;
+		else if ( !strcasecmp( arg, "both" ) )   opt_api_mode = API_MODE_BOTH;
+		else
+		{
+			fprintf( stderr, "unknown api mode -- '%s'\n", arg );
+			show_usage_and_exit(1);
+		}
+		break;
+	case 1064: // api-token
+		free( opt_api_token );
+		opt_api_token = strdup( arg );
+		break;
+	case 1065: // api-cors
+		free( opt_api_cors );
+		opt_api_cors = strdup( arg );
+		break;
+	case 1067: // api-control
+		opt_api_control = 1;
+		break;
+	case 1068: // api-control-min-interval
+		v = atoi( arg );
+		if ( v < 0 ) show_usage_and_exit(1);
+		opt_api_control_min_interval = v;
+		break;
+	case 1069: // api-control-park-timeout
+		v = atoi( arg );
+		if ( v < 0 ) show_usage_and_exit(1);
+		opt_api_control_park_timeout = v;
+		break;
+	case 1066: // api-http-port
+		v = atoi( arg );
+		if ( v < 0 || v > 65535 )
+			show_usage_and_exit(1);
+		opt_api_http_port = v;
 		break;
 	case 'B':  // background
 		opt_background = true;
@@ -4147,6 +4315,13 @@ int main(int argc, char *argv[])
 	thr_hashrates = (double *) calloc(opt_n_threads, sizeof(double));
 	if (!thr_hashrates)
 		return 1;
+	thr_share_counts = (struct thr_shares *) calloc(opt_n_threads,
+	                                                sizeof(*thr_share_counts));
+	if (!thr_share_counts)
+		return 1;
+	// Needs opt_n_threads, so it cannot run any earlier: it sizes the parking
+	// acknowledgement array the control API waits on.
+	api_ctl_init();
 
 	/* init workio thread info */
 	work_thr_id = opt_n_threads;

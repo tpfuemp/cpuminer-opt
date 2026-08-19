@@ -1169,19 +1169,31 @@ int yespower(yespower_local_t *local,
  *
  * Return 0 on success; or -1 on error.
  */
+/* File scope rather than function scope so yespower_tls_free() can reach them:
+ * the region is up to 16 MB (yescryptr32) and must be released on an algo
+ * switch, which only the owning thread can do. */
+static __thread int yespower_tls_initialized = 0;
+static __thread yespower_local_t yespower_tls_local;
+
 int yespower_tls(const uint8_t *src, size_t srclen,
     const yespower_params_t *params, yespower_binary_t *dst, int thrid )
 {
-	static __thread int initialized = 0;
-	static __thread yespower_local_t local;
-
-	if (!initialized) {
-		if (yespower_init_local(&local))
+	if (!yespower_tls_initialized) {
+		if (yespower_init_local(&yespower_tls_local))
 			return -1;
-		initialized = 1;
+		yespower_tls_initialized = 1;
 	}
 
-	return yespower( &local, src, srclen, params, dst, thrid );
+	return yespower( &yespower_tls_local, src, srclen, params, dst, thrid );
+}
+
+/* Idempotent: the next yespower_tls() re-initialises the region. */
+void yespower_tls_free( void )
+{
+	if (!yespower_tls_initialized)
+		return;
+	yespower_free_local(&yespower_tls_local);
+	yespower_tls_initialized = 0;
 }
 
 int yespower_init_local(yespower_local_t *local)

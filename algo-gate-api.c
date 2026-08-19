@@ -253,6 +253,7 @@ int null_hash()
 static void init_algo_gate( algo_gate_t* gate )
 {
    gate->miner_thread_init       = (void*)&return_true;
+   gate->miner_thread_free       = (void*)&do_nothing;
    gate->scanhash                = (void*)&scanhash_generic;
    gate->hash                    = (void*)&null_hash;
    gate->get_new_work            = (void*)&std_get_new_work;

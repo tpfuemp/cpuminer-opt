@@ -136,6 +136,12 @@ int ( *hash )     ( void*, const void*, int );
 // other initialization specific to miner threads.
 bool ( *miner_thread_init )     ( int );
 
+// Counterpart to the above: free this thread's algo buffers. Runs ON the
+// owning thread, so it can reach __thread pointers nothing else can.
+// Must be idempotent (thread exit, algo switch, rolled-back switch): NULL the
+// pointers and let the next init or lazy allocation remake them.
+void ( *miner_thread_free )     ( int );
+
 // Get thread local copy of blockheader with unique nonce.
 void ( *get_new_work )          ( struct work*, struct work*, int, uint32_t* );
 

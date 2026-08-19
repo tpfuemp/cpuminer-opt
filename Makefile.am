@@ -65,6 +65,11 @@ cpuminer_SOURCES = \
   cpu-miner.c \
   util.c \
   api.c \
+  api_model.c \
+  api_http.c \
+  api_routes.c \
+  api_metrics.c \
+  api_control.c \
   sysinfos.c \
   algo-gate-api.c\
   malloc-huge.c \

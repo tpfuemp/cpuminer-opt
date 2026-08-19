@@ -571,6 +571,16 @@ extern bool aes_ni_supported;
 extern char *rpc_user;
 extern char *short_url;
 
+// --api-mode. docs/api-rest.md section 2: `binary` is the default so that an
+// upgrade changes nothing; `both` decides per connection from the first bytes.
+#define API_MODE_BINARY 0
+#define API_MODE_HTTP   1
+#define API_MODE_BOTH   2
+extern int   opt_api_mode;
+extern char *opt_api_token;
+extern char *opt_api_cors;
+extern int   opt_api_http_port;
+
 struct thread_q;
 
 struct thread_q *tq_new(void);
@@ -1072,7 +1082,13 @@ Options:\n\
       --cpu-affinity    set process affinity to cpu core(s), mask 0x3 for cores 0 and 1\n\
       --cpu-priority    set process priority (default: 0 idle, 2 normal to 5 highest) (deprecated)\n\
   -b, --api-bind=address[:port]   IP address for the miner API, default port is 4048)\n\
+                        the address is also the only one accepted; use\n\
+                        0.0.0.0 to accept the network\n\
       --api-remote      allow remote control\n\
+      --api-mode=MODE   API protocol: binary (default), http, or both\n\
+      --api-token=TOK   require 'Authorization: Bearer TOK' on every REST route\n\
+      --api-cors=ORIGIN send Access-Control-Allow-Origin and answer OPTIONS\n\
+      --api-http-port=N with --api-mode=both, serve REST on its own port\n\
       --max-temp=N      only mine if cpu temp is less than specified value (linux)\n\
       --max-rate=N[KMG] only mine if net hashrate is less than specified value\n\
       --max-diff=N      only mine if net difficulty is less than specified value\n\
@@ -1100,6 +1116,17 @@ static struct option const options[] = {
         { "algo", 1, NULL, 'a' },
         { "api-bind", 1, NULL, 'b' },
         { "api-remote", 0, NULL, 1030 },
+        // REST API, docs/api-rest.md. 1067-1069 are RESERVED for the control
+        // API (--api-control, --api-control-min-interval,
+        // --api-control-park-timeout) and deliberately not registered yet: an
+        // option that parses but gates nothing is worse than a missing one.
+        { "api-mode", 1, NULL, 1063 },
+        { "api-token", 1, NULL, 1064 },
+        { "api-cors", 1, NULL, 1065 },
+        { "api-http-port", 1, NULL, 1066 },
+        { "api-control", 0, NULL, 1067 },
+        { "api-control-min-interval", 1, NULL, 1068 },
+        { "api-control-park-timeout", 1, NULL, 1069 },
         { "background", 0, NULL, 'B' },
         { "benchmark", 0, NULL, 1005 },
         { "cputest", 0, NULL, 1006 },

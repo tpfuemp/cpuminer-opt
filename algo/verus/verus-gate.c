@@ -747,6 +747,19 @@ bool verus_self_test( void ) { return false; }
 
 #endif  /* VERUS_HAVE_SIMD */
 
+/* The 8 KB private key buffer plus its restore journal, one per thread. */
+static void verus_thread_free( int thr_id )
+{
+   (void)thr_id;
+   if ( !verus_ctx ) return;
+#if defined(_WIN32)
+   _aligned_free( verus_ctx );
+#else
+   free( verus_ctx );
+#endif
+   verus_ctx = NULL;
+}
+
 bool register_verus_algo( algo_gate_t *gate )
 {
 #if !defined(VERUS_HAVE_SIMD)
@@ -783,6 +796,7 @@ bool register_verus_algo( algo_gate_t *gate )
       return false;
    }
    gate->scanhash              = (void*)&scanhash_verus;
+   gate->miner_thread_free     = (void*)&verus_thread_free;
    gate->hash                  = (void*)&verushash_full;
    gate->build_extraheader     = (void*)&equihash_build_extraheader;
    gate->build_stratum_request = (void*)&equihash_build_stratum_request;

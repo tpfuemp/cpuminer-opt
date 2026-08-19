@@ -137,6 +137,11 @@ extern int yespower_tls(const uint8_t *src, size_t srclen,
 extern int yespower_b2b_tls(const uint8_t *src, size_t srclen,
     const yespower_params_t *params, yespower_binary_t *dst, int thr_id);
 
+/* Release the calling thread's yespower region (up to 16 MB on yescryptr32).
+ * Idempotent; the next yespower_tls() re-initialises it. No-op in builds where
+ * yespower-opt.c compiles to nothing. */
+extern void yespower_tls_free( void );
+
 extern int yespower_tls_ref(const uint8_t *src, size_t srclen,
     const yespower_params_t *params, yespower_binary_t *dst, int thr_id);
 

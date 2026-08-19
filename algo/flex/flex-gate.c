@@ -1,5 +1,6 @@
 #include "flex-gate.h"
 #include "flex-cryptonight.h"
+#include "../gr/cryptonight.h"   // cryptonight_free_scratchpad(), shared cores
 #include "../blake/sph_blake.h"
 #include "../bmw/sph_bmw.h"
 #include "../cubehash/sph_cubehash.h"
@@ -345,6 +346,13 @@ int scanhash_flex( struct work *work, uint32_t max_nonce, uint64_t *hashes_done,
    return 0;
 }
 
+/* Flex uses its own CryptoNight cores but the same per-thread scratchpad. */
+static void flex_thread_free( int thr_id )
+{
+   (void)thr_id;
+   cryptonight_free_scratchpad();
+}
+
 bool register_flex_algo( algo_gate_t *gate )
 {
    // SHA3-style keccak padding for every keccak in the Flex chain (consensus).
@@ -356,6 +364,7 @@ bool register_flex_algo( algo_gate_t *gate )
       return false;
    }
    gate->scanhash        = (void*)&scanhash_flex;
+gate->miner_thread_free = (void*)&flex_thread_free;
    gate->hash            = (void*)&flex_hash;
    gate->gen_merkle_root = (void*)&flex_gen_merkle_root;
    gate->optimizations   = SSE2_OPT | AES_OPT | AVX2_OPT | NEON_OPT;

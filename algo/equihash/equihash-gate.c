@@ -384,6 +384,16 @@ static bool equihash_thread_init_gate(int thr_id)
     return true;
 }
 
+/* The largest per-thread allocation in the tree: 7 MB for 96/5 up to ~3.6 GB
+ * for 192/7, so releasing it on an algo switch is not a nicety. The next scan
+ * reallocates through ensure_workspace(). */
+static void equihash_thread_free_gate(int thr_id)
+{
+    (void)thr_id;
+    eh_workspace_free(tl_ws);
+    tl_ws = NULL;
+}
+
 /* ── Self-test: known-answer validation against real blockchain data ─────────
  *
  * Validates equihash_verify() against real (block header, solution) pairs taken
@@ -582,6 +592,7 @@ static void fill_gate(algo_gate_t *gate)
 {
     gate->scanhash              = (void *)&scanhash_equihash;
     gate->miner_thread_init     = (void *)&equihash_thread_init_gate;
+    gate->miner_thread_free     = (void *)&equihash_thread_free_gate;
     gate->build_extraheader     = (void *)&equihash_build_extraheader;
     gate->build_stratum_request = (void *)&equihash_build_stratum_request;
     gate->get_work_data_size    = (void *)&equihash_get_work_data_size;
