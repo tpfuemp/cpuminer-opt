@@ -96,6 +96,7 @@ Per-algorithm documentation lives in [`algorithms/`](algorithms/):
 - [X-chains (x11–x17 and relatives)](algorithms/x-chains.md) — Dash and many others
 - [SkyDoge](algorithms/skydoge.md) — SkyDoge
 - [SHA3T](algorithms/sha3t.md) — BitcoinIII (BC3), Fjarcode (FJAR)
+- [HeavyHash](algorithms/heavyhash.md) — Optical Bitcoin (OBTC), Ursula (URSA)
 - [Simple & legacy hashes](algorithms/simple-hashes.md) — sha256d, blake, keccak, groestl, skein, quark and more
 
 ---

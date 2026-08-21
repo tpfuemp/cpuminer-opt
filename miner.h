@@ -664,6 +664,7 @@ enum algos {
         ALGO_FLEX,           /* Kylacoin / Lyncoin                 */
         ALGO_GHOSTRIDER,
         ALGO_GROESTL,
+        ALGO_HEAVYHASH,      /* Optical Bitcoin (OBTC), Ursula (URSA) */
         ALGO_HEX,
         ALGO_HMQ1725,
         ALGO_HOOHASHV110,    /* PePePoW                            */
@@ -777,6 +778,7 @@ static const char* const algo_names[] = {
         "flex",
         "ghostrider",
         "groestl",
+        "heavyhash",
         "hex",
         "hmq1725",
         "hoohashv110",
@@ -958,6 +960,7 @@ Options:\n\
                           flex          Kylacoin\n\
                           ghostrider    Raptoreum (RTM)\n\
                           groestl       Groestl coin\n\
+                          heavyhash     Optical Bitcoin (OBTC), Ursula (URSA)\n\
                           hex           x16r-hex\n\
                           hmq1725       Espers\n\
                           hoohashv110   PepePow\n\

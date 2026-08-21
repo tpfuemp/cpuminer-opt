@@ -41,6 +41,7 @@ bool register_equihash192_algo( algo_gate_t *gate );
 bool register_flex_algo( algo_gate_t *gate );
 bool register_gr_algo( algo_gate_t *gate );
 bool register_groestl_algo( algo_gate_t *gate );
+bool register_heavyhash_algo( algo_gate_t *gate );
 bool register_hex_algo( algo_gate_t *gate );
 bool register_hmq1725_algo( algo_gate_t *gate );
 bool register_hoohashv110_algo( algo_gate_t *gate );

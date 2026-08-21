@@ -352,6 +352,7 @@ cpuminer_SOURCES = \
   algo/blake3/blake3.c \
   algo/blake3/blake3_dispatch.c \
   algo/blake3/blake3_portable.c \
+  algo/heavyhash/heavyhash.c \
   algo/hoohash/hoohash.c \
   algo/x22/x22i-4way.c \
   algo/x22/x22i.c \

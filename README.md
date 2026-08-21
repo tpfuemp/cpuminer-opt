@@ -82,6 +82,7 @@ Supported Algorithms
                           flex          Kylacoin
                           ghostrider    Raptoreum (RTM)
                           groestl       Groestl coin
+                          heavyhash     Optical Bitcoin (OBTC), Ursula (URSA)
                           hex           x16r-hex
                           hmq1725       
                           hoohashv110   PepePow

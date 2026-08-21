@@ -320,6 +320,7 @@ case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_FLEX:         rc = register_flex_algo          ( gate ); break;
     case ALGO_GHOSTRIDER:   rc = register_gr_algo            ( gate ); break;
     case ALGO_GROESTL:      rc = register_groestl_algo       ( gate ); break;
+    case ALGO_HEAVYHASH:    rc = register_heavyhash_algo     ( gate ); break;
     case ALGO_HEX:          rc = register_hex_algo           ( gate ); break;
     case ALGO_HMQ1725:      rc = register_hmq1725_algo       ( gate ); break;
     case ALGO_HOOHASHV110:  rc = register_hoohashv110_algo   ( gate ); break;
