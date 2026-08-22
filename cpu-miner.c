@@ -46,7 +46,7 @@
 #include <windows.h>
 #endif
 
-/* ── available_system_memory() ───────────────────────────────────────────
+/* -- available_system_memory() -------------------------------------------
  * Returns bytes of physical memory currently available for new allocations.
  * Returns 0 on any failure; callers must treat 0 as "unknown, skip cap".
  *
@@ -80,7 +80,7 @@ uint64_t available_system_memory(void)
     fclose(f);
     if ( !avail ) avail = freemem;
 
-    /* ── Container awareness (LXC / Docker / k8s) ─────────────────────────
+    /* -- Container awareness (LXC / Docker / k8s) -------------------------
      * /proc/meminfo reports the HOST's memory inside a container unless lxcfs
      * (or similar) is mounted over it, so the figure above can be many times
      * the memory this process may actually use. Take the tighter of the two by
@@ -329,6 +329,8 @@ int opt_api_listen = 0;
 int opt_api_remote = 0;
 const char *default_api_allow = "127.0.0.1";
 int default_api_listen = 4048;
+// Generated per link by build-stamp.c; see Makefile.am.
+extern const char build_stamp_date[];
 // REST API (docs/api-rest.md section 2). Default binary, so an upgrade changes
 // nothing about how the port behaves.
 int   opt_api_mode      = API_MODE_BINARY;
@@ -1165,6 +1167,52 @@ static struct share_stats_t share_stats[ s_stats_size ] = {{0}};
 static int s_get_ptr = 0, s_put_ptr = 0;
 static struct timeval last_submit_time = {0};
 
+// Drop everything describing the run that just ended, on a control algo switch:
+// hashrates differ by orders of magnitude between algorithms and share counts
+// belong to the pool that issued them.
+//
+// Unlocked by design -- the caller switches only with every miner thread parked
+// (api_control.c). Do not call it from elsewhere without revisiting that.
+//
+// Process-lifetime figures are deliberately left alone; api_model.c carries them
+// across the reset.
+void api_reset_session_stats( void )
+{
+   submitted_share_count = 0;
+   accepted_share_count  = 0;
+   rejected_share_count  = 0;
+   stale_share_count     = 0;
+   solved_block_count    = 0;
+   stratum_errors        = 0;
+
+   submit_sum = accept_sum = reject_sum = stale_sum = solved_sum = 0;
+   norm_diff_sum   = 0.;
+   highest_share   = 0.;
+   lowest_share    = 9e99;
+   last_targetdiff = 0.;
+
+   // The in-flight ring is deliberately not wiped: a share can still be waiting
+   // on its ack, and dropping its record loses the accounting. It self-clears.
+   // last_submit_time is set to now rather than zeroed -- share_result
+   // subtracts it, so a zero reports an interval of the whole unix epoch.
+   gettimeofday( &last_submit_time, NULL );
+
+   // Without this the reported hashrate keeps the old algorithm's magnitude
+   // until every thread has finished a scan.
+   if ( thr_hashrates )
+      for ( int i = 0; i < opt_n_threads; i++ )
+         thr_hashrates[i] = 0.;
+   global_hashrate = 0.;
+   total_hashes    = 0.;
+   gettimeofday( &total_hashes_time, NULL );
+
+   gettimeofday( &session_start, NULL );
+   gettimeofday( &five_min_start, NULL );
+   session_first_block = 0;
+
+   api_history_reset();
+}
+
 static inline int stats_ptr_incr( int p )
 {
    return ++p % s_stats_size;
@@ -1388,8 +1436,15 @@ static int share_result( int result, struct work *work,
       gettimeofday( &ack_time, NULL );
       timeval_subtract( &latency_tv, &ack_time, &my_stats.submit_time );
       latency = ( latency_tv.tv_sec * 1e3  + latency_tv.tv_usec / 1e3 );
-      timeval_subtract( &et, &my_stats.submit_time, &last_submit_time );
-      share_time = (double)et.tv_sec + ( (double)et.tv_usec / 1e6 );
+      // First share of a run: nothing to measure from, and without this the
+      // interval comes out as the whole unix epoch.
+      if ( last_submit_time.tv_sec )
+      {
+         timeval_subtract( &et, &my_stats.submit_time, &last_submit_time );
+         share_time = (double)et.tv_sec + ( (double)et.tv_usec / 1e6 );
+      }
+      else
+         share_time = 0.;
       memcpy( &last_submit_time, &my_stats.submit_time,
               sizeof last_submit_time );
    }
@@ -2677,7 +2732,7 @@ static void *miner_thread( void *userdata )
        // Select nonce range based on max64, the estimated number of hashes
        // to meet the desired scan time.
        // For fast algos (SHA256d etc.) max64 is millions; for slow algos
-       // (equihash ~0.03 Sol/s) it rounds to 0 — use 1 not 1000 as the
+       // (equihash ~0.03 Sol/s) it rounds to 0 - use 1 not 1000 as the
        // minimum so slow algos do 1 iteration per call, not 1000.
        uint32_t work_nonce = *nonceptr;
        if ( max64 <= 0)
@@ -3174,8 +3229,8 @@ static void *stratum_thread(void *userdata )
             applog(LOG_BLUE,"Stratum connection established" );
             if ( stratum.new_job )   // prime first job
             {
-               stratum_down = false;
                stratum_gen_work( &stratum, &g_work );
+               stratum_down = false;   // only after g_work holds the new job
             }
          }
       }
@@ -3185,7 +3240,9 @@ static void *stratum_thread(void *userdata )
       {
          if ( likely( s = stratum_recv_line( &stratum ) ) )
          {
-            stratum_down = false;
+            // Not cleared here: the first line after a reconnect is usually
+            // set_difficulty, and releasing the miners on it lets them hash the
+            // previous pool's g_work. Cleared below, once a job is installed.
             if ( likely( !stratum_handle_method( &stratum, s ) ) )
                stratum_handle_response( s );
             free( s );
@@ -3250,7 +3307,10 @@ static void *stratum_thread(void *userdata )
          } // stratum_keepalive
 
          if ( stratum.new_job && !stratum_need_reset )
+         {
             stratum_gen_work( &stratum, &g_work );
+            stratum_down = false;
+         }
 
       } // stratum_need_reset
    }  // loop
@@ -3375,12 +3435,16 @@ static bool cpu_capability( bool display_only )
      cpu_brand_string( cpu_brand );
      printf( "CPU: %s\n", cpu_brand );
 
-     // Build
-     printf( "SW built on " __DATE__
+     // Build. build_stamp_date comes from the generated build-stamp.c, which is
+     // rewritten on every relink; __DATE__ here would report whenever this file
+     // last happened to be recompiled. See Makefile.am.
+     printf( "SW built on %s", build_stamp_date );
      #if defined(__clang__)
-        " with CLANG-%d.%d.%d", __clang_major__, __clang_minor__, __clang_patchlevel__ );
+        printf( " with CLANG-%d.%d.%d", __clang_major__, __clang_minor__,
+                __clang_patchlevel__ );
      #elif defined(__GNUC__)
-        " with GCC-%d.%d.%d", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__ );
+        printf( " with GCC-%d.%d.%d", __GNUC__, __GNUC_MINOR__,
+                __GNUC_PATCHLEVEL__ );
      #endif
 
      // OS
@@ -4090,8 +4154,8 @@ int main(int argc, char *argv[])
             if ( cap < 1 ) cap = 1;
             if ( cap < opt_n_threads ) {
                applog( LOG_WARNING,
-                  "Available RAM %.0f MB, per-thread workspace %.0f MB — "
-                  "capping threads %d → %d to prevent OOM.  "
+                  "Available RAM %.0f MB, per-thread workspace %.0f MB - "
+                  "capping threads %d -> %d to prevent OOM.  "
                   "Use -t to override.",
                   avail  / (1024.0 * 1024.0),
                   ws     / (1024.0 * 1024.0),
@@ -4099,7 +4163,7 @@ int main(int argc, char *argv[])
                opt_n_threads = cap;
             } else {
                applog( LOG_INFO,
-                  "Memory check: %.0f MB available, %.0f MB/thread — "
+                  "Memory check: %.0f MB available, %.0f MB/thread - "
                   "%d thread(s) OK",
                   avail / (1024.0 * 1024.0),
                   ws    / (1024.0 * 1024.0),
@@ -4111,7 +4175,7 @@ int main(int argc, char *argv[])
    else
    {
       /* -t was given explicitly, so the cap above is deliberately skipped.
-       * Still warn if the request cannot fit — silently reserving more than
+       * Still warn if the request cannot fit - silently reserving more than
        * RAM looks exactly like a memory leak to the user (equihash192 at
        * 4.2 GB/thread x 12 = 50 GB), and inside a container it ends in an
        * OOM kill rather than an allocation failure.                        */
@@ -4123,7 +4187,7 @@ int main(int argc, char *argv[])
          if ( avail > 0 && need > avail )
             applog( LOG_WARNING,
                "-t %d requests %.1f GB (%.0f MB/thread) but only %.1f GB is "
-               "available — expect heavy swapping or an OOM kill. This is a "
+               "available - expect heavy swapping or an OOM kill. This is a "
                "reservation, not a leak: RSS climbs until every thread's "
                "workspace is touched. Drop -t to let it auto-cap.",
                opt_n_threads, need / (1024.0*1024.0*1024.0),

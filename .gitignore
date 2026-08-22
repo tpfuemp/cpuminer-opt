@@ -48,3 +48,6 @@ sign/
 sign.sh
 
 compat/curl-for-windows/
+
+# generated per link, carries the SW built on date (see Makefile.am)
+build-stamp.c

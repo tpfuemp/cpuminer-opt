@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <float.h>       /* DBL_MAX_10_EXP -- see diff_str below */
 #include <time.h>
 
 #include <jansson.h>
@@ -43,8 +44,10 @@ struct api_summary_snapshot
    double      acc_per_min;
    /* Preformatted: the legacy renderer prints no decimals for an integral
     * difficulty. Kept as a string so both renderers agree on the rounding
-    * instead of each re-deriving it. */
-   char        diff_str[16];
+    * instead of each re-deriving it. Sized for "%.6f" of any finite double,
+    * not for a plausible difficulty: at char[16] a net_diff above ~1e8
+    * overflowed and aborted the miner. */
+   char        diff_str[DBL_MAX_10_EXP + 16];
    double      diff;             /* the same value, unformatted */
    /* diff above collapses net-or-else-stratum into one number; JSON reports
     * the two separately, so keep both. */
@@ -150,6 +153,15 @@ void api_history_add( int thr_id, uint32_t height, double hashrate,
 /* Newest first. thr_id < 0 means every thread, interleaved newest first.
  * Returns how many records were written, at most max. */
 int  api_history_get( int thr_id, struct api_history_record *out, int max );
+/* Discard every sample; samples either side of an algo switch are not
+ * comparable. */
+void api_history_reset( void );
+
+/* Drop the stats describing the run that just ended: share counters, hashrates,
+ * best/lowest share, the share ring. Defined in cpu-miner.c, which owns those
+ * statics. Safe only with every miner thread parked, so api_control.c is the
+ * sole caller. Process-lifetime figures survive it. */
+void api_reset_session_stats( void );
 
 /* Render exactly as the legacy binary protocol always has. Returns the number
  * of bytes written, excluding the terminator. */

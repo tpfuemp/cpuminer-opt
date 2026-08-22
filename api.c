@@ -115,10 +115,10 @@ extern double global_hashrate;
 
 #define cpu_threads opt_n_threads
 
-#define USE_MONITORING
+/* No USE_MONITORING gate here: the temp/fan/clock reads live in api_model.c,
+ * where a #define in this file cannot reach them. */
 extern float cpu_temp(int);
 extern uint32_t cpu_clock(int);
-//extern int cpu_fanpercent(void);
 
 /***************************************************************/
 
@@ -300,11 +300,8 @@ static size_t base64_encode(const uchar *indata, size_t insize, char *outptr, si
 			break;
 		output += 4; len += 4;
 	}
-	/* B9. This passed `len` -- the ENCODED length -- as the destination size, so
-	 * snprintf always truncated the final character, and the "== 27 then append
-	 * '='" hack below papered over it. That hack only worked for 20-byte SHA-1
-	 * input, where the lost character happens to be the single '=' pad.
-	 * The size argument is the DESTINATION size. */
+	/* The size argument is the DESTINATION size, not the encoded length --
+	 * passing the latter truncated the final character on every call. */
 	len = snprintf(outptr, outlen, "%s", outbuf);
 	free(outbuf);
 
@@ -379,7 +376,12 @@ static int websocket_handshake(SOCKETTYPE c, char *result, char *clientkey)
 	if (opt_protocol)
 		applog(LOG_DEBUG, "clientkey: %s", clientkey);
 
-	sprintf(inpkey, "%s258EAFA5-E914-47DA-95CA-C5AB0DC85B11", clientkey);
+	/* clientkey is the client's Sec-WebSocket-Key, so it must be bounded. A
+	 * truncated key would hash to the wrong accept value, so fail instead. */
+	if (snprintf(inpkey, sizeof(inpkey),
+	             "%s258EAFA5-E914-47DA-95CA-C5AB0DC85B11", clientkey)
+	    >= (int) sizeof(inpkey))
+		return -1;
 
 	// SHA-1 test from rfc, returns in base64 "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
 	//sprintf(inpkey, "dGhlIHNhbXBsZSBub25jZQ==258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
@@ -433,10 +435,8 @@ static int websocket_handshake(SOCKETTYPE c, char *result, char *clientkey)
 		// WebSocket Frame - Header + Data
 		memcpy(p, hd, frames);
 		memcpy(p + frames, result, (size_t)datalen);
-		/* B10. The `+ 1` sent one byte past the payload -- the calloc'd NUL --
-		 * so a stray octet followed the frame and a client reading a second
-		 * frame started on garbage. Harmless only because the socket closes
-		 * immediately after. The frame is header + payload, nothing more. */
+		/* Header + payload, nothing more: sending one byte past the payload
+		 * appends the calloc'd NUL and corrupts a following frame. */
 		send(c, (const char*)data, (int) (handlen + frames + (size_t)datalen), 0);
 		free(data);
 	}

@@ -1466,6 +1466,8 @@ static bool socket_full(curl_socket_t sock, int timeout)
 	return false;
 }
 
+extern bool stratum_need_reset;   /* cpu-miner.c */
+
 bool stratum_socket_full(struct stratum_ctx *sctx, int timeout)
 {
 	return strlen(sctx->sockbuf) || socket_full(sctx->sock, timeout);
@@ -1534,7 +1536,13 @@ char *stratum_recv_line(struct stratum_ctx *sctx)
 		} while (time(NULL) - rstart < 60 && !strstr(sctx->sockbuf, "\n"));
 
 		if (!ret) {
-			applog(LOG_WARNING, "stratum_recv_line failed");
+			/* Expected when we requested the reset: stratum_wake() shuts the
+			 * read side, so a failing read is the mechanism, not a fault.
+			 * Warning level would make every pool switch look like an error. */
+			if (stratum_need_reset)
+				applog(LOG_DEBUG, "stratum read ended for a requested reset");
+			else
+				applog(LOG_WARNING, "stratum_recv_line failed");
 			goto out;
 		}
 	}
@@ -1652,6 +1660,23 @@ bool stratum_connect(struct stratum_ctx *sctx, const char *url)
 #endif
 
 	return true;
+}
+
+/* Make a stratum thread blocked in select() return now, so a pool change does
+ * not wait up to opt_timeout on traffic from the pool being left. Shutting the
+ * read side reports EOF at once. Not a disconnect: curl and the buffer are left
+ * to the normal reset path. */
+void stratum_wake(struct stratum_ctx *sctx)
+{
+#ifdef WIN32
+	const int how = SD_RECEIVE;
+#else
+	const int how = SHUT_RD;
+#endif
+	pthread_mutex_lock(&sctx->sock_lock);
+	if (sctx->curl && sctx->sock != CURL_SOCKET_BAD)
+		shutdown(sctx->sock, how);
+	pthread_mutex_unlock(&sctx->sock_lock);
 }
 
 void stratum_disconnect(struct stratum_ctx *sctx)

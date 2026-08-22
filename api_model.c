@@ -35,6 +35,38 @@ extern uint32_t api_get_pool_disconnects( void );
 
 static time_t api_start_time = 0;
 
+/* Process-lifetime share totals, carried across the counter reset a control
+ * algo switch performs. accepted_per_min and the Prometheus miner_shares_total
+ * are contract-bound to process lifetime, and a counter that decreases corrupts
+ * rate(). API thread only, so no lock; idempotent. */
+static uint64_t mono_accepted, mono_rejected, mono_stale, mono_solved,
+                mono_submitted;
+
+static void mono_carry( uint64_t *base, uint32_t *last, uint32_t now )
+{
+   if ( now < *last )      /* counter went backwards: it was reset */
+      *base += *last;
+   *last = now;
+}
+
+static void api_mono_update( void )
+{
+   static uint32_t l_acc, l_rej, l_stale, l_solved, l_sub;
+   static uint64_t b_acc, b_rej, b_stale, b_solved, b_sub;
+
+   mono_carry( &b_acc,    &l_acc,    accepted_share_count  );
+   mono_carry( &b_rej,    &l_rej,    rejected_share_count  );
+   mono_carry( &b_stale,  &l_stale,  stale_share_count     );
+   mono_carry( &b_solved, &l_solved, solved_block_count    );
+   mono_carry( &b_sub,    &l_sub,    submitted_share_count );
+
+   mono_accepted  = b_acc    + accepted_share_count;
+   mono_rejected  = b_rej    + rejected_share_count;
+   mono_stale     = b_stale  + stale_share_count;
+   mono_solved    = b_solved + solved_block_count;
+   mono_submitted = b_sub    + submitted_share_count;
+}
+
 void api_model_set_start_time( time_t t )
 {
    api_start_time = t;
@@ -67,24 +99,31 @@ void api_collect_summary( struct api_summary_snapshot *s )
    s->submitted = submitted_share_count;
    s->stale     = stale_share_count;
 
-   s->acc_per_min = ( 60.0 * accepted_share_count ) / ( uptime ? uptime : 1.0 );
+   /* Process-lifetime per the contract, so it uses the carried total rather
+    * than the live counter, which a control algo switch resets. */
+   api_mono_update();
+   s->acc_per_min = ( 60.0 * (double)mono_accepted )
+                  / ( uptime ? uptime : 1.0 );
 
    diff = net_diff > 0. ? net_diff : stratum_diff;
    s->diff      = diff;
    s->diff_pool = stratum_diff;
    s->diff_net  = net_diff;
-   /* Legacy rounding: no decimals when the difficulty is integral. */
+   /* Legacy rounding: no decimals when the difficulty is integral. Bounded
+    * write, so no diff value can turn a status read into a crash. */
    if ( diff == trunc( diff ) )
-      sprintf( s->diff_str, "%.0f", diff );
+      snprintf( s->diff_str, sizeof(s->diff_str), "%.0f", diff );
    else
-      sprintf( s->diff_str, "%.6f", diff );
+      snprintf( s->diff_str, sizeof(s->diff_str), "%.6f", diff );
 
-#ifdef USE_MONITORING
+   /* Unguarded, like the other collectors here: sysinfos.c is #included above
+    * and already returns 0 where a platform has no sensor. Do not reinstate a
+    * #ifdef -- the previous one was defined in another TU, so this block was
+    * dead and every reader reported TEMP=0. */
    s->has_monitoring = true;
    s->cpu_temp  = cpu_temp( 0 );
    s->cpu_fan   = cpu_fanpercent();
    s->cpu_clock = cpu_clock( 0 );
-#endif
 
    s->uptime = uptime;
    s->ts     = (uint32_t)ts;
@@ -263,6 +302,19 @@ static bool history_alloc( void )
    }
    hist_threads = opt_n_threads;
    return true;
+}
+
+/* Samples either side of an algo switch are not comparable, so /history starts
+ * empty rather than serving a series with a discontinuity in it. The ring is
+ * kept: opt_n_threads has not changed. */
+void api_history_reset( void )
+{
+   pthread_mutex_lock( &hist_lock );
+   if ( hist_count )
+      for ( int i = 0; i < hist_threads; i++ )
+         hist_count[i] = 0;
+   hist_next_id = 1;
+   pthread_mutex_unlock( &hist_lock );
 }
 
 void api_history_add( int thr_id, uint32_t height, double hashrate,
@@ -560,10 +612,13 @@ void api_collect_metrics( api_metrics_input *in )
    in->net_difficulty  = s.diff_net;
    in->pool_difficulty = s.diff_pool;
 
-   in->shares_accepted = s.accepted;
-   in->shares_rejected = s.rejected;
-   in->shares_stale    = s.stale;
-   in->blocks_solved   = s.solved;
+   /* Carried totals, not s.* : these are Prometheus counters, and a control
+    * algo switch resets the live counters underneath them. api_collect_summary
+    * above has already refreshed them. */
+   in->shares_accepted = mono_accepted;
+   in->shares_rejected = mono_rejected;
+   in->shares_stale    = mono_stale;
+   in->blocks_solved   = mono_solved;
 
    /* One CPU device, matching /devices. Temperature only where there is a
     * sensor: an omitted series beats a fabricated zero. Power, fan and

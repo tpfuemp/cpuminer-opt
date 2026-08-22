@@ -18,11 +18,14 @@
 #include "miner.h"
 #include "algo-gate-api.h"
 #include "api_control.h"
+#include "api_model.h"      /* api_reset_session_stats() */
 
 extern char *rpc_url;
 extern char *rpc_user;
 extern char *rpc_pass;
 extern bool  stratum_need_reset;
+extern bool  stratum_down;
+extern struct stratum_ctx stratum;
 
 /* CLI, api_control.c owns the defaults so an unset option cannot mean 0. */
 int  opt_api_control              = 0;
@@ -489,6 +492,11 @@ static bool switch_algo( int new_algo )
                      algo_names[ new_algo ], opt_api_control_park_timeout );
       return false;
    }
+
+   /* Only now, and only on the success path: a rolled-back switch never ran the
+    * new algorithm, so its stats still describe what is still running. Threads
+    * are parked here, which is what makes an unlocked reset safe. */
+   api_reset_session_stats();
    return true;
 }
 
@@ -603,7 +611,14 @@ ctl_result_t api_ctl_profile( const char *algo, const char *pool_url,
          snprintf( packed, sizeof(packed), "%s", pool_url );
 
       parse_arg( 'o', packed );
+      /* Mark the pool down here, not from the stratum thread: unpark_all()
+       * below releases the miners at once, and until the reset is processed a
+       * resumed thread would hash the PREVIOUS pool's job with the NEW algo and
+       * submit shares the pool rejects. Threads idle on stratum_down. The wake
+       * is what makes the reset prompt rather than up to opt_timeout away. */
+      stratum_down = true;
       stratum_need_reset = true;
+      stratum_wake( &stratum );
    }
 
    pthread_mutex_lock( &ctl_lock );

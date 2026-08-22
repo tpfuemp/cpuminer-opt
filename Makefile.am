@@ -379,7 +379,22 @@ else
 endif
 
 cpuminer_LDFLAGS = @LDFLAGS@
-cpuminer_LDADD	= libcurvehash_secp256k1.a $(EXTRA_LIBS) @LIBCURL@ -ljansson @PTHREAD_LIBS@ @WS2_LIBS@ -lgmp
+cpuminer_LDADD	= libcurvehash_secp256k1.a $(EXTRA_LIBS) @LIBCURL@ -ljansson @PTHREAD_LIBS@ @WS2_LIBS@ -lgmp build-stamp.$(OBJEXT)
+
+# Carries the date for the "SW built on" banner. Depends on the objects, so it
+# is regenerated exactly when a relink is due: `make` with nothing to do stays a
+# no-op, and the date printed is when the binary was actually linked. __DATE__
+# in cpu-miner.c cannot do this -- make does not recompile that file when some
+# other one changes.
+EXTRA_cpuminer_DEPENDENCIES = build-stamp.$(OBJEXT)
+CLEANFILES = build-stamp.c build-stamp.$(OBJEXT)
+
+build-stamp.c: $(cpuminer_OBJECTS) libcurvehash_secp256k1.a
+	$(AM_V_GEN)printf 'const char build_stamp_date[] = "%s";\n' \
+	  "`date '+%b %d %Y %H:%M:%S'`" > $@
+
+build-stamp.$(OBJEXT): build-stamp.c
+	$(AM_V_CC)$(CC) $(CFLAGS) -c -o $@ build-stamp.c
 cpuminer_CPPFLAGS = @LIBCURL_CPPFLAGS@ $(ALL_INCLUDES)
 cpuminer_CFLAGS = -Wno-pointer-sign -Wno-pointer-to-int-cast $(disable_flags)
 

@@ -250,8 +250,17 @@ int null_hash()
    return 0;
 };
 
+// Algo-owned globals living outside the gate struct. Reset for the same reason
+// every gate field is: a register_*_algo that relies on the default would
+// otherwise inherit the previous algo's value across a runtime algo switch.
+extern double opt_target_factor;
+extern int    hard_coded_eb;
+
 static void init_algo_gate( algo_gate_t* gate )
 {
+   opt_target_factor = 1.0;   // cpu-miner.c default
+   hard_coded_eb     = 1;     // keccak-gate.c default: Keccak padding, not SHA3
+
    gate->miner_thread_init       = (void*)&return_true;
    gate->miner_thread_free       = (void*)&do_nothing;
    gate->scanhash                = (void*)&scanhash_generic;
