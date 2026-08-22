@@ -69,7 +69,7 @@ implementation to keep bit-identical.
 **SHA-256-throughput-bound, not memory-bound**. Hardware SHA-256 (SHA-NI, ARMv8 SHA2) is worth
 **~3×** and is the whole performance story; huge pages and prefetch do not apply at 128 KiB.
 
-### ⚠️ Use every logical CPU, or pin one thread per core
+### WARNING: Use every logical CPU, or pin one thread per core
 
 Balloon benefits from SMT (+54% on a single core), so on an SMT machine the right setting is
 **`-t <all logical CPUs>`**. Measured on an i7-11700F (8 cores / 16 threads), Windows:
@@ -110,7 +110,7 @@ thread count including `-t 16`. Build with `-DBALLOON_FORCE_1WAY` to compare.
 Use **all cores** here: the little cluster is 98% additive and worth a third of the total, so
 restricting to the big cores costs 32%.
 
-⚠️ On a big.LITTLE board, **any thread count below the core count needs an affinity mask**. Threads
+WARNING: On a big.LITTLE board, **any thread count below the core count needs an affinity mask**. Threads
 are assigned to the set bits of the mask in order, and cpu0-3 are the *little* cores — so an
 unmasked `-t 4` runs entirely on A55s, and an unmasked `-t 1` reports half the real per-core rate.
 

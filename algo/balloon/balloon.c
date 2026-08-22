@@ -92,7 +92,7 @@ void balloon_build_indices( uint16_t *idx, const uint8_t salt[BALLOON_SALT_LEN] 
  * Worth only ~4%: the bookkeeping overlaps with the SHA dependency chain that
  * is the real critical path. Timing the primitive suggests 2x; it is not.   */
 
-/* ⚠️ Not `SHA256_IV` from algo/sha/sha256-hash.h: that is declared with no
+/* WARNING: Not `SHA256_IV` from algo/sha/sha256-hash.h: that is declared with no
  * initializer, so every consumer gets a zero-filled copy and would silently
  * hash from a zero state. The real values have internal linkage there.      */
 static const uint32_t balloon_sha256_iv[8] =
@@ -103,7 +103,7 @@ static const uint32_t balloon_sha256_iv[8] =
 
 /* `blk` must already hold `nblocks` complete, padded 64-byte blocks.
  *
- * ⚠️ State and message must both be 16-byte aligned — the transforms use
+ * WARNING: State and message must both be 16-byte aligned — the transforms use
  * aligned vector loads and segfault otherwise. Undocumented at the
  * declaration; in-tree callers get it free from `sha256_context`.          */
 static inline void balloon_sha256_blocks( uint8_t *out, const uint8_t *blk,

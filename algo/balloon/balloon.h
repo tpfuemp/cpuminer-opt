@@ -94,7 +94,7 @@ void balloon_bitstream_raw( uint8_t *out, size_t outlen,
 #endif
 
 /* 1.82x on a Cortex-A76 cluster, 1.04-1.07x on Rocket Lake, pool-confirmed on
- * both. ⚠️ Measure whole hashes: per-block timing says 0.96x on x86, wrong
+ * both. WARNING: Measure whole hashes: per-block timing says 0.96x on x86, wrong
  * even in sign. BALLOON_FORCE_{1,2}WAY override for A/B.                    */
 #if BALLOON_HAVE_2WAY && !defined(BALLOON_FORCE_1WAY)
   #define BALLOON_USE_2WAY 1
@@ -109,7 +109,7 @@ typedef struct
    uint8_t  idx_salt[ BALLOON_SALT_LEN ];    /* which salt `idx` is for */
    bool     idx_valid;
 
-   /* ⚠️ aligned(64) is load-bearing: the transforms use aligned vector loads
+   /* WARNING: aligned(64) is load-bearing: the transforms use aligned vector loads
     * and fault otherwise.                                                  */
    uint8_t  mfill  [ BALLOON_PAD( BALLOON_MSG_FILL   ) ] __attribute__((aligned(64)));
    uint8_t  mexpand[ BALLOON_PAD( BALLOON_MSG_EXPAND ) ] __attribute__((aligned(64)));
@@ -144,7 +144,7 @@ void         balloon_thread_ctx_free( void );
 void balloon_hash_header( balloon_ctx *ctx, const void *input, void *digest );
 
 #if BALLOON_HAVE_2WAY
-/* Two nonces of the SAME JOB at once. ⚠️ Both headers must share bytes 0..31 —
+/* Two nonces of the SAME JOB at once. WARNING: Both headers must share bytes 0..31 —
  * they index one shared table, so a caller that pairs headers from different
  * jobs gets a well-formed digest computed from the wrong index stream. Pairing
  * nonces within one `scanhash` call satisfies this by construction.         */

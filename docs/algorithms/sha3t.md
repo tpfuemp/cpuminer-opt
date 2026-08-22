@@ -36,7 +36,7 @@ pre-standard Keccak-256 (`0x01`) that Ethereum and `-a keccak` use. Getting this
 changes every digest. In this tree the selector is the global `hard_coded_eb`, which
 `register_sha3t_algo` sets to `6`.
 
-## ⚠️ Merkle root: sha3t is *not* sha3d
+## WARNING: Merkle root: sha3t is *not* sha3d
 
 `sha3d` overrides the Stratum merkle-root construction to hash the coinbase with `sha3d`.
 **`sha3t` does not** — it uses the ordinary `sha256d` merkle root, like Bitcoin. The two
@@ -60,7 +60,7 @@ unrelated value with `sha3d`.
 | `scanhash_sha3t_2x64` | 2 nonces | SSE2, **or** NEON *with* the ARMv8.2 SHA3 extension |
 | `scanhash_sha3t` | 1 nonce | everything else — including **aarch64 without that extension** |
 
-⚠️ Note the last two rows: unlike `sha3d` and `keccak`, which take the 2×64 path on any NEON
+WARNING: Note the last two rows: unlike `sha3d` and `keccak`, which take the 2×64 path on any NEON
 target, `sha3t` only does so when `__ARM_FEATURE_SHA3` is defined. On ARM parts lacking it the
 scalar path is faster — see *Performance* below. Which path a binary chose is visible in its
 startup self-test line (`sha3t 2-way self-test PASSED …` versus `sha3t self-test PASSED …`).
@@ -108,7 +108,7 @@ per-lane throughput against the scalar reference is **109% (AVX-512), 74% (AVX2)
 the AVX-512 path is *superlinear* only because the scalar path is itself spilling out of 16
 general-purpose registers.
 
-### ⚠️ aarch64: the scalar path is currently the faster one
+### WARNING: aarch64: the scalar path is currently the faster one
 
 That register argument does **not** carry over to ARM, and measurement on a Rockchip RK3588S
 (Cortex-A76 + A55) shows the opposite of what it predicts: the NEON 2×64 path reaches only

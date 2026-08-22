@@ -57,7 +57,7 @@ RK3588S, one core at a fixed clock, digests verified identical:
 - Startup logs a warning naming the emulated primitive, so this is never silent.
 - **If the CPU has the extension, emulating is a misconfiguration.** Use
   `-march=armv8-a+crypto` (Pi 4, RK3399) or `-march=armv8.2-a+crypto` (RK3588, Orange Pi 5);
-  `armbuild-all.sh` builds both. ⚠️ **With clang, `-march=native` does not enable the crypto
+  `armbuild-all.sh` builds both. WARNING: **With clang, `-march=native` does not enable the crypto
   extension** (gcc's does) — use `-mcpu=native` or spell out `+crypto`.
 - **A 64-bit OS is required**: the NEON layer is `__aarch64__`-only, so armhf is out.
 - Still far ahead of the alternative: the scalar software-AES path is ~4–5× worse again.
@@ -77,7 +77,7 @@ Whole miner, every core busy:
 | RK3588S, all 8 cores | 5356 kH/s | **5804** | **+8.4%** |
 | i7-11700F, `-t 16` | 12.0 MH/s | 11.1 | −7.6% → **off** |
 
-⚠️ **Single-core benchmarks give the wrong answer here** — isolated, the A76 gain is only
+WARNING: **Single-core benchmarks give the wrong answer here** — isolated, the A76 gain is only
 7% and the A55 shows a 7% *loss*. Load every core before concluding anything.
 `FORCE_VERUS_1WAY` / `FORCE_VERUS_2WAY` override the choice at build time; the verification
 harnesses cover both paths either way. **To see which path a binary uses, run with `-D`:**
@@ -96,7 +96,7 @@ VerusHash: clhash path 2 nonces interleaved (aarch64 default)
 - **Use every logical CPU.** SMT is worth 30–40%, and the little cores are genuinely
   additive: the four A55s supply ~30% of the R6S total, losing only ~5% of their standalone
   rate while the big cores are busy.
-- ⚠️ **Cutting threads without an affinity mask is worse than it looks.** Thread N maps to the
+- WARNING: **Cutting threads without an affinity mask is worse than it looks.** Thread N maps to the
   Nth *set bit* of the mask and cpu0-3 are the A55s, so `-t 4` alone runs entirely on the
   little cores: ≈1.75 MH/s, under a third of `-t 8`.
 - **Do not carry over CryptoNight/minotaur affinity advice.** Pinning to the big cluster suits

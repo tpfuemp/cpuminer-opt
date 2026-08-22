@@ -18,7 +18,7 @@
  * registration, before any worker thread exists. false on allocation failure. */
 bool curvehash_kernel_init( void );
 
-/* ⚠️⚠️ NOT SAFE FOR SIGNING OR ANY SECRET SCALAR. ⚠️⚠️
+/* WARNING:WARNING: NOT SAFE FOR SIGNING OR ANY SECRET SCALAR. WARNING:WARNING:
  *
  * This kernel multiplies in VARIABLE TIME, in TWO independent ways: it indexes
  * the precomputed table directly, so the scalar leaks through the data cache,

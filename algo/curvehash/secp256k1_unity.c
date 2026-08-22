@@ -1,7 +1,7 @@
 /*
  * Unity build of the vendored libsecp256k1 (MIT) for the curvehash PoW.
  *
- * ⚠ This is NO LONGER on the hot path. Mining runs curvehash-kernel.c, the
+ * WARNING: This is NO LONGER on the hot path. Mining runs curvehash-kernel.c, the
  * extracted k*G subset, which is the file that gets tuned. This TU is kept
  * because it is the *pristine* public API: curvehash_self_test() runs random
  * scalars through both and requires identical points, so the untouched

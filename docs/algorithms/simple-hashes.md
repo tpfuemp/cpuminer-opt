@@ -35,7 +35,7 @@ the most thoroughly SIMD-optimized algorithms in the project.
 (Veil's `sha256dv` is a SHA-256d variant with its own Stratum protocol — see
 [SHA256Dv](sha256dv.md).)
 
-⚠️ `sha3d` and `sha3t` differ by more than the round count: `sha3d` builds the Stratum
+WARNING: `sha3d` and `sha3t` differ by more than the round count: `sha3d` builds the Stratum
 merkle root with `sha3d`, `sha3t` uses the ordinary `sha256d`. See [SHA3T](sha3t.md).
 
 ## Keccak
