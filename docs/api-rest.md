@@ -112,7 +112,7 @@ Status codes, and the stable `error.code` that goes with each:
 | 403 | `forbidden` | unprivileged source, or `/control/*` without `--api-control` |
 | 404 | `not_found` | unknown route, or index out of range |
 | 405 | `method_not_allowed` | known path, wrong verb |
-| 409 | `conflict` | a control mutation is already in progress, or one could not complete |
+| 409 | `conflict` | a control mutation is already in progress, or one could not complete — including a switch refused because the target algorithm's per-thread workspace does not fit in RAM (§7.5) |
 | 413 | `payload_too_large` | body over 8 KiB |
 | 429 | `too_many_requests` | control mutation inside `--api-control-min-interval` |
 | 501 | `not_implemented` | this miner cannot serve this route |
@@ -428,7 +428,32 @@ Legal bodies: `algo`+`pool` (± `params`, `run`) for a full switch; `pool` alone
 same algorithm; `params` alone to retune the current algorithm; `run` alone as a synonym for
 `start`/`pause`.
 
-### 7.5 Worked profit-switch sequence
+### 7.5 Memory-hungry algorithms are refused, not attempted
+
+A switch whose target needs more memory than the machine has free is rejected with `409` and a
+`last_error` naming the arithmetic:
+
+```
+equihash144 needs 24.3 GB for 8 threads (3106 MB each) but only 14.0 GB is free
+-- 3 thread(s) would fit. Restart with -t 3 to mine it here.
+```
+
+The check runs after the target algorithm registers (its workspace is sized from the params read
+at registration, so it is not knowable earlier) and before any thread allocates, keeping the same
+20 % margin the startup thread-cap uses. Threads are parked and the previous algorithm is restored,
+so a refusal costs a brief pause and nothing else.
+
+The thread count cannot be lowered to fit: threads are parked for a switch, not destroyed, so
+mining N threads is a property of the process. **A manager that wants a high-memory algorithm on a
+small machine must start the miner with a suitable `-t`** — or run one miner process per algorithm
+class. The refusal exists because the alternative is not a failed allocation but an OOM kill: the
+workspaces are touched, so overcommit cannot absorb them, and the kernel takes the whole process
+down along with its session stats and any queued shares.
+
+NOTE: this is the one control-path failure a manager cannot retry its way out of. Treat a `409`
+mentioning `needs … GB` as permanent for that `(algo, params, -t)` combination.
+
+### 7.6 Worked profit-switch sequence
 
 ```
 GET  /api/v1/                     → capabilities; confirm "control.profile" is present

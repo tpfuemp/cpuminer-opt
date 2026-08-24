@@ -445,6 +445,11 @@ float cpu_temp( int core );
 
 uint64_t available_system_memory(void);  // bytes currently free for new allocs
 
+// Threads of a ws-bytes-each algo that fit in free RAM (20% margin kept).
+// Returns `want` when there is no workspace or free RAM is unknowable;
+// *avail_out is the figure used, 0 meaning "could not tell".
+int workspace_thread_fit( size_t ws, int want, uint64_t *avail_out );
+
 struct work
 {
    uint32_t target[8] __attribute__ ((aligned (64)));

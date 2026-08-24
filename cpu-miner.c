@@ -151,6 +151,40 @@ uint64_t available_system_memory(void)
 #endif
 }
 
+/* -- workspace_thread_fit() ------------------------------------------------
+ * How many threads of a `ws`-bytes-per-thread algorithm fit in the memory that
+ * is free right now, keeping the same 20 % margin the startup cap uses. Never
+ * returns more than `want`.
+ *
+ * Returns 0 when not even one thread fits - equihash 125/4 wants 5.8 GB, so on
+ * a 4 GB board that is the honest answer. Callers that must run something
+ * anyway (startup) clamp to 1 themselves; callers that can decline (the runtime
+ * switch) should decline, since 1 thread that does not fit is still an OOM kill.
+ *
+ * Returns `want` unchanged when there is nothing to decide - no workspace, or a
+ * platform that will not say how much memory is free - because guessing is
+ * worse than not capping. `*avail_out` receives the figure used (0 when it is
+ * unknown), which is how a caller tells "it fits" from "we cannot tell".
+ *
+ * Shared by startup below and by the runtime algo switch (api_control.c). The
+ * switch is the path that needs it most: the startup cap runs once, under
+ * whatever algo was selected then, so switching from a no-workspace algo to
+ * equihash 144/5 (3.1 GB/thread) used to inherit the old thread count and get
+ * the process OOM-killed with no miner-side error at all.                    */
+int workspace_thread_fit( size_t ws, int want, uint64_t *avail_out )
+{
+    if ( avail_out ) *avail_out = 0;
+    if ( ws == 0 || want <= 0 ) return want;
+
+    uint64_t avail = available_system_memory();
+    if ( avail_out ) *avail_out = avail;
+    if ( avail == 0 ) return want;
+
+    uint64_t usable = (uint64_t)( (double)avail * 0.80 );
+    int      cap    = (int)( usable / ws );
+    return cap < want ? cap : want;
+}
+
 #ifdef _MSC_VER
 #include <stdint.h>
 #else
@@ -4147,11 +4181,21 @@ int main(int argc, char *argv[])
    if ( !opt_n_threads_set ) {
       size_t ws = algo_gate.get_workspace_size();
       if ( ws > 0 ) {
-         uint64_t avail = available_system_memory();
+         uint64_t avail = 0;
+         int      cap   = workspace_thread_fit( ws, opt_n_threads, &avail );
+         if ( avail > 0 && cap < 1 ) {
+            /* Not even one thread fits. Start anyway with one - refusing to
+             * run is worse than letting the operator see it try - but say so
+             * plainly, because the likely next event is an OOM kill.        */
+            applog( LOG_WARNING,
+               "Available RAM %.0f MB but %s needs %.0f MB for a single "
+               "thread. Starting 1 thread; expect heavy swapping or an OOM "
+               "kill. This machine cannot mine %s.",
+               avail / (1024.0*1024.0), algo_names[ opt_algo ],
+               ws    / (1024.0*1024.0), algo_names[ opt_algo ] );
+            cap = 1;
+         }
          if ( avail > 0 ) {
-            uint64_t usable  = (uint64_t)( avail * 0.80 );
-            int      cap     = (int)( usable / ws );
-            if ( cap < 1 ) cap = 1;
             if ( cap < opt_n_threads ) {
                applog( LOG_WARNING,
                   "Available RAM %.0f MB, per-thread workspace %.0f MB - "

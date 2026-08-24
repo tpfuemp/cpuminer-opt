@@ -27,13 +27,30 @@ with SHA-256d and comparing against the share target.
 
 A variant is identified by its parameters `(n, k)`:
 
-| Algo | n / k | Solution | Approx. workspace | Personalization | Notable coins |
+| Algo | n / k | Solution | Workspace **per thread** | Personalization | Notable coins |
 |---|---|---|---|---|---|
-| `equihash`    | 200 / 9 | 1344 B | ~190 MB | `ZcashPoW` | Zcash (ZEC), Horizen (ZEN), Komodo (KMD) |
-| `equihash96`  | 96 / 5  | 68 B   | ~7 MB   | `ZcashPoW` | MinexCoin and other small-cap coins |
-| `equihash125` | 125 / 4 | 52 B   | ~4 GB   | `ZelProoW` | Flux / ZelCash |
-| `equihash144` | 144 / 5 | 100 B  | ~2.2 GB | `BgoldPoW` | Bitcoin Gold (BTG) |
-| `equihash192` | 192 / 7 | 400 B  | ~3 GB   | `"ZERO    "` | ZeroClassic |
+| `equihash`    | 200 / 9 | 1344 B | **325 MB** | `ZcashPoW` | Zcash (ZEC), Horizen (ZEN), Komodo (KMD) |
+| `equihash96`  | 96 / 5  | 68 B   | **11 MB**  | `ZcashPoW` | MinexCoin and other small-cap coins |
+| `equihash125` | 125 / 4 | 52 B   | **5.78 GB** | `ZelProoW` | Flux / ZelCash |
+| `equihash144` | 144 / 5 | 100 B  | **3.03 GB** | `BgoldPoW` | Bitcoin Gold (BTG) |
+| `equihash192` | 192 / 7 | 400 B  | **4.00 GB** | `"ZERO    "` | ZeroClassic |
+
+Those are exact figures out of `eh_workspace_bytes()`, not estimates — the
+previous table here understated every variant, which is the wrong direction to
+be wrong in when someone is sizing a machine. **The cost is per mining thread**, so what
+matters is `workspace × -t`:
+
+| Algo | fits in 4 GB | 8 GB | 16 GB | 32 GB | 64 GB |
+|---|---|---|---|---|---|
+| `equihash96`  | 299 | 598 | 1196 | 2393 | 4787 |
+| `equihash`    | 10 | 20 | 40 | 80 | 161 |
+| `equihash144` | 1 | 2 | 4 | 8 | 16 |
+| `equihash192` | **0** | 1 | 3 | 6 | 12 |
+| `equihash125` | **0** | 1 | 2 | 4 | 8 |
+
+(80 % of free RAM, which is the margin both the startup thread-cap and the
+runtime algo switch apply.) A `0` means the variant does not fit *one* thread on
+that machine at all.
 
 Larger `n` means larger solutions and higher memory use; `k` sets the number of
 collision rounds (and the solution size, `2^k` indices). Each variant uses a Blake2b
@@ -43,12 +60,33 @@ collision rounds (and the solution size, `2^k` indices). Each variant uses a Bla
 **Coin aliases** resolve to a variant, so e.g. `-a btg` selects `equihash144` and
 `-a zcash` / `-a zen` / `-a flux` select their respective variants.
 
-> Practical note: workspace grows from ~7 MB (96/5) to several GB (144/5, 192/7,
-> 125/4), and solve time grows with it — from sub-millisecond (96/5) to seconds
-> (the large variants). On CPU, only **96/5** is comfortably real-time and **200/9**
-> is marginal; the multi-GB variants are slow and effectively GPU/ASIC territory.
-> The large variants `malloc` their workspace at startup and will not mine if the
-> machine lacks the RAM.
+> Practical note: workspace grows from 11 MB (96/5) to 5.8 GB (125/4), and solve
+> time grows with it — from sub-millisecond (96/5) to seconds (the large
+> variants). On CPU, only **96/5** is comfortably real-time and **200/9** is
+> marginal; the multi-GB variants are slow and effectively GPU/ASIC territory.
+
+**Memory behaviour, three things worth knowing before deploying a large variant:**
+
+1. **Threads are the only lever, not bytes.** The workspace is two hash buffers
+   (`2 × N × slot_bytes`) plus one parent-index plane per round (`k × N × 8`),
+   where `N = 1.1 × 2^(collision_bits+1)` rows. Both dominant terms are linear in
+   `N`, and `N` is fixed by the parameters. The three obvious savings — dropping a
+   pair plane, narrowing the second buffer, packing parent indices — come to ~17 %
+   between them, and none is free: the first is simply invalid (reconstruction
+   reads *every* plane), the second needs a per-round variable slot stride through
+   both backends, the third puts unaligned 7-byte accesses in the innermost
+   collision loop. Details and prices in the harness.
+2. **The reservation is touched, so overcommit will not absorb it.** RSS climbs
+   until every thread has walked its workspace. On Linux the allocator uses
+   `mmap`+`madvise(THP)`; a request that does not fit does not fail, it gets the
+   process OOM-killed with no miner-side error at all.
+3. **Startup caps threads; a runtime algo switch refuses instead.** Without an
+   explicit `-t`, startup reduces the thread count to what fits (and warns loudly
+   if not even one does, then tries with one). A switch via
+   `POST /api/v1/control/profile` cannot lower the thread count — threads are
+   parked for a switch, not destroyed — so it returns `409` and keeps mining the
+   previous algorithm. To reach a large variant on a small machine, start the
+   miner with a suitable `-t`.
 
 ## How it works
 

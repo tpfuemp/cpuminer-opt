@@ -445,8 +445,13 @@ bool api_ctl_param_get_str( const char *name, const char **out )
 /* ---------------------------------------------------------------- profile */
 
 /* Free every thread's algo buffers, then re-register the gate. Returns false
- * with last_error set; the caller rolls back. */
-static bool switch_algo( int new_algo )
+ * with last_error set; the caller rolls back.
+ *
+ * `memcheck` refuses the switch when the new algo's per-thread workspace does
+ * not fit in RAM. Pass false on a rollback: the algo being restored was already
+ * running with these threads, so its workspace demonstrably fit, and a
+ * transient dip in free memory must not strand the miner with no gate. */
+static bool switch_algo( int new_algo, bool memcheck )
 {
    /* Step 1: every thread frees its own buffers, under the algo that
     * allocated them. They are already parked, so this is a generation bump
@@ -478,6 +483,49 @@ static bool switch_algo( int new_algo )
          applog( LOG_ERR, "control: could not restore algo %s after a failed "
                           "switch -- mining is stopped", algo_names[ prev ] );
       return false;
+   }
+
+   /* Between registration and step 2 is the only window where refusing is
+    * free: the gate now reports the new algo's workspace (equihash sizes it
+    * from the params read at registration, so it cannot be known earlier), and
+    * no thread has allocated yet. Past this point the threads take the memory
+    * and touch it, so overcommit does not save us and the kernel kills the
+    * process - losing the session, the share stats and any queued shares.
+    * The startup cap in main() cannot cover this: it ran once, under whatever
+    * algo was selected then, which for a 0-byte-workspace algo is no cap. */
+   if ( memcheck )
+   {
+      const size_t ws = algo_gate.get_workspace_size();
+      uint64_t     avail = 0;
+      const int    fit = workspace_thread_fit( ws, opt_n_threads, &avail );
+      if ( fit < opt_n_threads )
+      {
+         /* fit == 0 is a real answer, not a rounding artefact: equihash 125/4
+          * wants 5.8 GB for one thread. Saying "restart with -t 0" would be
+          * nonsense, so that case gets its own wording. */
+         if ( fit < 1 )
+            ctl_set_error( "%s needs %.1f GB per thread but only %.1f GB is "
+                           "free -- this machine cannot mine it at any thread "
+                           "count.",
+                           algo_names[ new_algo ], ws / (1024.0*1024.0*1024.0),
+                           avail / (1024.0*1024.0*1024.0) );
+         else
+            ctl_set_error( "%s needs %.1f GB for %d threads (%.0f MB each) but "
+                           "only %.1f GB is free -- %d thread(s) would fit. "
+                           "Restart with -t %d to mine it here.",
+                           algo_names[ new_algo ],
+                           (double)ws * opt_n_threads / (1024.0*1024.0*1024.0),
+                           opt_n_threads, ws / (1024.0*1024.0),
+                           avail / (1024.0*1024.0*1024.0), fit, fit );
+         applog( LOG_WARNING, "control: refused switch to %s -- %s",
+                 algo_names[ new_algo ], ctl_last_error );
+         opt_algo = prev;
+         if ( !register_algo_gate( prev, &algo_gate ) )
+            applog( LOG_ERR, "control: could not restore algo %s after "
+                             "refusing %s -- mining is stopped",
+                    algo_names[ prev ], algo_names[ new_algo ] );
+         return false;
+      }
    }
 
    /* Step 2: the gate is the new algo's now, so the threads allocate against
@@ -583,14 +631,16 @@ ctl_result_t api_ctl_profile( const char *algo, const char *pool_url,
       /* Sticky: load whatever was last set for the algo we are moving to,
        * including anything this call just stored. */
       params_load_into_globals( new_algo );
-      ok = switch_algo( new_algo );
+      ok = switch_algo( new_algo, true );
    }
    else if ( ok && nparams )
    {
       /* Parameters only: the registration is what reads them, so re-run it
        * for the algo already in use. */
       params_load_into_globals( param_algo );
-      ok = switch_algo( param_algo );
+      /* Params only, but equihash's workspace is sized from them, so a
+       * 144/5 -> 192/7 change can be the thing that no longer fits. */
+      ok = switch_algo( param_algo, true );
    }
 
    if ( ok && pool_url && *pool_url )
@@ -643,7 +693,7 @@ ctl_result_t api_ctl_profile( const char *algo, const char *pool_url,
       if ( ( new_algo >= 0 && opt_algo != prev_algo ) || nparams )
       {
          params_load_into_globals( prev_algo );
-         switch_algo( prev_algo );
+         switch_algo( prev_algo, false );   /* see switch_algo's memcheck note */
       }
       if ( prev_url && ( !rpc_url || strcmp( prev_url, rpc_url ) ) )
       {

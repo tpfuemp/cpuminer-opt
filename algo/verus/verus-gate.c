@@ -747,10 +747,13 @@ bool verus_self_test( void ) { return false; }
 
 #endif  /* VERUS_HAVE_SIMD */
 
-/* The 8 KB private key buffer plus its restore journal, one per thread. */
+/* The 8 KB private key buffer plus its restore journal, one per thread.
+ * verus_ctx only exists behind VERUS_HAVE_SIMD; without it there is nothing to
+ * free, but the function still has to compile (SSE4.2/SSE2/x64 builds). */
 static void verus_thread_free( int thr_id )
 {
    (void)thr_id;
+#if defined(VERUS_HAVE_SIMD)
    if ( !verus_ctx ) return;
 #if defined(_WIN32)
    _aligned_free( verus_ctx );
@@ -758,6 +761,7 @@ static void verus_thread_free( int thr_id )
    free( verus_ctx );
 #endif
    verus_ctx = NULL;
+#endif
 }
 
 bool register_verus_algo( algo_gate_t *gate )

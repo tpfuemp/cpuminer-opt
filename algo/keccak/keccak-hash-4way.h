@@ -19,6 +19,15 @@
  */
 #define KECCAK64_BUF_LANES   (144/8)
 
+// Scalar single-block SHA3-256 from a pre-padded state: one permutation, no
+// buffer, no padding VLA, 2 NOT64s instead of 6. `dst` is 32 bytes.
+// NOTE: SHA3 padding (0x06) is baked in and hard_coded_eb is IGNORED -- not usable
+// for keccak/sha3d, which need 0x01. Inputs must be exactly 80 / 32 bytes, each
+// of which fits the 136-byte rate in a single block. Little-endian hosts.
+// Must stay OUTSIDE the per-ISA blocks below: plain uint64_t, every target.
+void sha3_256_prepad80( void *dst, const void *src );
+void sha3_256_prepad32( void *dst, const void *src );
+
 #if defined(SIMD512)
 
 typedef struct

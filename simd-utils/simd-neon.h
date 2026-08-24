@@ -72,6 +72,19 @@
 #define v128_mulw32( v1, v0 ) \
    vmull_u32( vmovn_u64( v1 ), vmovn_u64( v0 ) )
 
+// Byte multiply with pairwise horizontal add into 16-bit lanes, the shape of
+// x86's PMADDUBSW:  r[k] = a[2k] * b[2k] + a[2k+1] * b[2k+1]
+// NEON has no single instruction for it, so this is three: two widening
+// multiplies and a pairwise add. Both operands are unsigned here, unlike the
+// x86 form, and nothing saturates.
+// NOTE: provided for portability of the name, not because it is the fast way to do
+// a byte matrix product on NEON: plain C over a uint8 matrix auto-vectorizes to
+// UMULL/UMLAL (or UDOT with FEAT_DotProd) and measured faster than any
+// hand-written pairing here. See algo/heavyhash/heavyhash.c.
+#define v128_maddw8( a, b ) \
+   vpaddq_u16( vmull_u8( vget_low_u8( a ), vget_low_u8( b ) ), \
+               vmull_high_u8( a, b ) )
+
 // compare
 #define v128_cmpeq64                  vceqq_u64
 #define v128_cmpeq32                  vceqq_u32

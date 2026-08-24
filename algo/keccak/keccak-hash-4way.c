@@ -730,7 +730,6 @@ void keccak512_2x64_ctx( void *cc, void *dst, const void *data, size_t len )
 SHA3T_PREPAD_FN( sha3t_2x64_prepad, v128_t, keccak64_ctx_v128,
                  v128_zero, v128_neg1, v128_64, v128_xor )
 
-
 #undef INPUT_BUF
 #undef DECL64
 #undef XOR64
@@ -745,3 +744,123 @@ SHA3T_PREPAD_FN( sha3t_2x64_prepad, v128_t, keccak64_ctx_v128,
 #undef XOR3
         
 
+/* ===================== scalar (1-way) pre-padded SHA3-256 =================
+ * Single-block SHA3-256 driven from a directly built state -- the 1-way
+ * analogue of sha3t_*_prepad above. Additive: nothing else in this file
+ * changes, and the macros below are instantiated for uint64_t exactly as the
+ * three vector sections instantiate them for their own types, so the round
+ * function and round constants are shared. There is no second copy of keccak.
+ *
+ * Why: the generic init/update/close path memsets a 200-byte state, memcpys the
+ * message into a buffer, builds a padding VLA and finishes with 6 NOT64s, all
+ * around a single permutation. A caller hashing one block per pass pays that
+ * every time; heavyhash pays it twice per nonce.
+ *
+ * NOTE: SHA3 padding (0x06) is baked in and hard_coded_eb is IGNORED, exactly
+ * as for sha3t_*_prepad -- NOT usable for keccak/sha3d, which need 0x01.
+ * Little-endian hosts only, like the rest of this file. */
+
+typedef struct { uint64_t w[25]; } keccak64_ctx_1way;
+
+#define DECL64(x)          uint64_t x
+#define XOR(d, a, b)       (d = (a) ^ (b))
+#define XOR64              XOR
+#define AND64(d, a, b)     (d = (a) & (b))
+#define OR64(d, a, b)      (d = (a) | (b))
+#define NOT64(d, s)        (d = ~(s))
+// The ternary folds away -- every call site passes a literal rho offset. It is
+// there because an offset of 0 would make `v >> 64` undefined behaviour.
+#define ROL64(d, v, n)     (d = (n) ? ( ((v) << (n)) | ((v) >> ( 64 - (n) )) ) \
+                                    : (v))
+#define XOROR(d, a, b, c)  (d = (a) ^ ( (b) | (c) ))
+#define XORAND(d, a, b, c) (d = (a) ^ ( (b) & (c) ))
+#define XOR3(d, a, b, c)   (d = (a) ^ (b) ^ (c))
+
+#include "keccak-macros.c"
+
+#define KECCAK_F_1600_1W_BODY   do { \
+    int j; \
+    for ( j = 0; j < 24; j += 8 ) \
+    { \
+       KF_ELT( 0,  1, RC[j + 0] ); \
+       KF_ELT( 1,  2, RC[j + 1] ); \
+       KF_ELT( 2,  3, RC[j + 2] ); \
+       KF_ELT( 3,  4, RC[j + 3] ); \
+       KF_ELT( 4,  5, RC[j + 4] ); \
+       KF_ELT( 5,  6, RC[j + 5] ); \
+       KF_ELT( 6,  7, RC[j + 6] ); \
+       KF_ELT( 7,  8, RC[j + 7] ); \
+       P8_TO_P0; \
+    } \
+} while (0)
+
+// KF_ELT defers THETA/RHO/KHI through LPAR/RPAR, which needs one further
+// expansion pass; DO() supplies it, the same way KECCAK_F_1600 does above.
+// Without it the compiler reports THETA as an implicit function declaration.
+#define KECCAK_F_1600_1W   DO(KECCAK_F_1600_1W_BODY)
+
+#define KEC1W_PAD06   0x0000000000000006ull
+#define KEC1W_PAD80   0x8000000000000000ull
+
+/* Lanes 1,2,8,12,17,20 are held complemented and the round function accounts
+ * for it, so a pre-padded state is those constants XORed with the message.
+ * Only lanes 0..3 are read back and only 1 and 2 of those are complemented, so
+ * 2 NOT64s replace the close path's 6. `first_free` is the lane holding the
+ * 0x06 pad byte, i.e. message length in lanes. */
+static inline void kec1w_tail( keccak64_ctx_1way *kc, int first_free )
+{
+   const uint64_t neg1 = ~(uint64_t)0;
+   for ( int i = first_free; i < 25; ++i ) kc->w[i] = 0;
+   kc->w[first_free] = KEC1W_PAD06;
+   // Lane 8 is inside an 80-byte message (the caller XORs it) but past a
+   // 32-byte one, where it is just the complement constant.
+   if ( first_free <= 8 ) kc->w[8] = neg1;
+   kc->w[12] = neg1;
+   kc->w[16] = KEC1W_PAD80;
+   kc->w[17] = neg1;
+   kc->w[20] = neg1;
+}
+
+static inline uint64_t kec1w_le64dec( const uint8_t *p )
+{
+   uint64_t v;
+   memcpy( &v, p, 8 );
+   return v;
+}
+
+void sha3_256_prepad80( void *dst, const void *src )
+{
+   keccak64_ctx_1way ctx;
+   keccak64_ctx_1way *kc = &ctx;       // the a00.. macros dereference `kc`
+   const uint64_t neg1 = ~(uint64_t)0;
+   const uint8_t *p = (const uint8_t*)src;
+
+   for ( int i = 0; i < 10; ++i ) kc->w[i] = kec1w_le64dec( p + 8*i );
+   kc->w[1] ^= neg1;  kc->w[2] ^= neg1;  kc->w[8] ^= neg1;
+   kec1w_tail( kc, 10 );
+
+   KECCAK_F_1600_1W;
+
+   const uint64_t d[4] = { kc->w[0], ~kc->w[1], ~kc->w[2], kc->w[3] };
+   memcpy( dst, d, 32 );
+}
+
+void sha3_256_prepad32( void *dst, const void *src )
+{
+   keccak64_ctx_1way ctx;
+   keccak64_ctx_1way *kc = &ctx;
+   const uint64_t neg1 = ~(uint64_t)0;
+   const uint8_t *p = (const uint8_t*)src;
+
+   for ( int i = 0; i < 4; ++i ) kc->w[i] = kec1w_le64dec( p + 8*i );
+   kc->w[1] ^= neg1;  kc->w[2] ^= neg1;
+   kec1w_tail( kc, 4 );
+
+   KECCAK_F_1600_1W;
+
+   const uint64_t d[4] = { kc->w[0], ~kc->w[1], ~kc->w[2], kc->w[3] };
+   memcpy( dst, d, 32 );
+}
+
+#undef KECCAK_F_1600_1W
+#undef KECCAK_F_1600_1W_BODY

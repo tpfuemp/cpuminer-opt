@@ -38,14 +38,25 @@ typedef struct {
  * essentially all of it at the smallest memory cost.                        */
 #define EH_ROW_SLACK_PCT 10
 
-/* Workspace size estimates (slot_bytes = hash_length + 4, N = max_rows):
+/* Per-thread workspace, EXACT (slot_bytes = hash_length + 4, N = max_rows),
+ * derived from eh_workspace_bytes() itself. An earlier table here over-stated
+ * the bucket arrays ~16x -- they are (nbuckets+1)*4 + nbuckets*4 = 8 MB once
+ * nbuckets caps at 2^20 -- and with it the totals for 144/5 and 125/4.
  *
- *   Variant  slot  hbuf×2          pairs(wk×N×8)    sort   buckets  Total
- *   96/5      16B  2×0.14M×16=5MB  5×0.14M×8=6MB   0.6MB   0.5MB  ~11 MB
- *   200/9     34B  2×2.3M×34=150MB 9×2.3M×8=158MB   9MB     8MB   ~325 MB
- *   144/5     22B  2×37M×22=1.5GB  5×37M×8=1.5GB  148MB  128MB   ~3.3 GB
- *   192/7     28B  2×37M×28=2.0GB  7×37M×8=2.0GB  148MB  128MB   ~4.2 GB
- *   125/4     24B  2×74M×24=3.5GB  4×74M×8=2.4GB  295MB  264MB   ~6.4 GB
+ *   Variant  slot   rows    hbuf×2   pairs(wk×N×8)   sort   bkts    Total
+ *   96/5      16B   0.1M      4 MB       5 MB        1 MB   1 MB     11 MB
+ *   200/9     34B   2.3M    150 MB     158 MB        9 MB   8 MB    325 MB
+ *   144/5     22B  36.9M   1549 MB    1408 MB      141 MB   8 MB   3106 MB
+ *   192/7     28B  36.9M   1971 MB    1971 MB      141 MB   8 MB   4091 MB
+ *   125/4     24B  73.8M   3379 MB    2253 MB      282 MB   8 MB   5922 MB
+ *
+ * Threads that fit in 80 % of free RAM (what the startup cap and the runtime
+ * switch both use): 144/5 needs 8 GB for 2 and 16 GB for 4; 192/7 and 125/4 do
+ * not fit a single thread in 4 GB. A machine cannot be made to fit by shaving
+ * this structure - see the harness for why the three obvious reductions
+ * (dropping a pair plane, narrowing the second buffer, packing parent indices)
+ * are respectively invalid, not cheap, and a bad trade, and total ~17 % anyway.
+ * The lever is the thread count.
  *
  * eh_workspace_alloc() sizes dynamically via eh_workspace_bytes().         */
 
