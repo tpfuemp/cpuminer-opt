@@ -1,7 +1,7 @@
 # Simple & legacy hashes
 
 **Family:** single-hash and short fixed-chain proof-of-work algorithms
-**Algorithm names:** `sha256d`, `sha256t`, `sha256q`, `sha256dt`, `sha512256d`,
+**Algorithm names:** `sha256d`, `sha256t`, `sha256q`, `sha256dt`, `sha256csm`, `sha512256d`,
 `sha3d`, `keccak`, `keccakc`, `blake`, `blakecoin`, `vanilla`, `blake2s`, `blake2b`,
 `pentablake`, `bmw`, `bmw512`, `groestl`, `dmd-gr`, `myr-gr`, `skein`, `skein2`,
 `whirlpool`, `whirlpoolx`, `nist5`, `quark`, `qubit`, `anime`
@@ -28,6 +28,7 @@ the most thoroughly SIMD-optimized algorithms in the project.
 | `sha256t` | SHA-256 applied three times | |
 | `sha256q` | SHA-256 applied four times | |
 | `sha256dt` | double SHA-256 with a **custom initialization vector** | |
+| `sha256csm` | double SHA-256 where the first hash covers the 80-byte header **zero-extended to 112 bytes** | Galleoncoin (GALE); aliases `gale`, `galleon` |
 | `sha512256d` | double SHA-512/256 (SHA-512 truncated to 256 bits) | |
 | `sha3d` | double Keccak-256 (SHA-3 padding) | BSHA3 |
 | `sha3t` | triple SHA3-256 | BitcoinIII (BC3), Fjarcode (FJAR) — see [SHA3T](sha3t.md) |

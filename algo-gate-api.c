@@ -359,6 +359,7 @@ case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_QUARK:        rc = register_quark_algo         ( gate ); break;
     case ALGO_QUBIT:        rc = register_qubit_algo         ( gate ); break;
     case ALGO_SCRYPT:       rc = register_scrypt_algo        ( gate ); break;
+    case ALGO_SHA256CSM:    rc = register_sha256csm_algo     ( gate ); break;
     case ALGO_SHA256D:      rc = register_sha256d_algo       ( gate ); break;
     case ALGO_SHA256DT:     rc = register_sha256dt_algo      ( gate ); break;
     case ALGO_SHA256DV:     rc = register_sha256dv_algo      ( gate ); break;
@@ -453,6 +454,8 @@ const char* const algo_alias_map[][2] =
   { "diamond",           "dmd-gr"         },
   { "espers",            "hmq1725"        },
   { "flax",              "c11"            },
+  { "gale",              "sha256csm"      },   /* Galleoncoin             */
+  { "galleon",           "sha256csm"      },
   { "hsr",               "x13sm3"         },
   { "jackpot",           "jha"            },
   { "lyra2",             "lyra2re"        },

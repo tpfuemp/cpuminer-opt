@@ -701,6 +701,7 @@ enum algos {
         ALGO_QUARK,
         ALGO_QUBIT,       
         ALGO_SCRYPT,
+        ALGO_SHA256CSM,
         ALGO_SHA256D,
         ALGO_SHA256DT,
         ALGO_SHA256DV,
@@ -816,6 +817,7 @@ static const char* const algo_names[] = {
         "quark",
         "qubit",
         "scrypt",
+        "sha256csm",
         "sha256d",
         "sha256dt",
         "sha256dv",
@@ -1001,6 +1003,7 @@ Options:\n\
                           scrypt        scrypt(1024, 1, 1) (default)\n\
                           scrypt:N      scrypt(N, 1, 1)\n\
                           scryptn2      scrypt(1048576, 1,1)\n\
+                          sha256csm     SHA-256d over a 112-byte header, Galleoncoin (GALE)\n\
                           sha256d       Double SHA-256\n\
                           sha256dt      Modified sha256d (Novo)\n\
                           sha256dv      SHA-256D Veil\n\

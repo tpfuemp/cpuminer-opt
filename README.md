@@ -114,6 +114,7 @@ Supported Algorithms
                           scrypt        scrypt(1024, 1, 1) (default)
                           scrypt:N      scrypt(N, 1, 1)
                           scryptn2      scrypt(1048576, 1, 1)
+                          sha256csm     SHA-256d over a 112-byte header, Galleoncoin (GALE)
                           sha256d       Double SHA-256
                           sha256dt
                           sha256dv      SHA-256D Veil
