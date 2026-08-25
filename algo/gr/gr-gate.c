@@ -76,8 +76,10 @@ static void selectAlgo( unsigned char nibble, bool *selectedAlgos,
    }
 }
 
-static void getAlgoString( const void *mem, unsigned int size,
-                           uint8_t *selectedAlgoOutput, int algoCount )
+// Shared with `mike` (VKAX/FortuneBlock), which is this same walk with
+// algoCount = 11. Exported via gr-gate.h; see algo/mike/mike-gate.c.
+void gr_get_algo_string( const void *mem, unsigned int size,
+                         uint8_t *selectedAlgoOutput, int algoCount )
 {
    unsigned char *p = (unsigned char*)mem;
    unsigned int len = size / 2;
@@ -96,7 +98,9 @@ static void getAlgoString( const void *mem, unsigned int size,
             selectedAlgoOutput[ selectedCount++ ] = i;
 }
 
-static void doCNAlgo( uint8_t algo, const void *in, void *hash, int size )
+// Shared with `mike`; the six CryptoNight variants and their parameters are
+// identical between the two algos (verified against VKAX Core slow-hash.h).
+void gr_do_cn_algo( uint8_t algo, const void *in, void *hash, int size )
 {
    switch ( algo )
    {
@@ -109,7 +113,8 @@ static void doCNAlgo( uint8_t algo, const void *in, void *hash, int size )
    }
 }
 
-static void doCoreAlgo( uint8_t algo, const void *in, void *hash, int size )
+// Shared with `mike`, which selects from entries 0..10 of this same table.
+void gr_do_core_algo( uint8_t algo, const void *in, void *hash, int size )
 {
    switch ( algo )
    {
@@ -191,34 +196,34 @@ void gr_hash( void *output, const void *input )
    uint8_t coreOrder[15];
    uint8_t cnOrder[6];
 
-   getAlgoString( (const uint8_t*)input + 4, 64, coreOrder, 15 );
-   getAlgoString( (const uint8_t*)input + 4, 64, cnOrder,    6 );
+   gr_get_algo_string((const uint8_t*)input + 4, 64, coreOrder, 15 );
+   gr_get_algo_string((const uint8_t*)input + 4, 64, cnOrder,    6 );
 
    // Group 1: first core round consumes the full 80-byte header.
-   doCoreAlgo( coreOrder[0], input,  hash_1, 80 );
-   doCoreAlgo( coreOrder[1], hash_1, hash_2, 64 );
-   doCoreAlgo( coreOrder[2], hash_2, hash_1, 64 );
-   doCoreAlgo( coreOrder[3], hash_1, hash_2, 64 );
-   doCoreAlgo( coreOrder[4], hash_2, hash_1, 64 );
-   doCNAlgo  ( cnOrder[0],   hash_1, hash_2, 64 );
+   gr_do_core_algo( coreOrder[0], input,  hash_1, 80 );
+   gr_do_core_algo( coreOrder[1], hash_1, hash_2, 64 );
+   gr_do_core_algo( coreOrder[2], hash_2, hash_1, 64 );
+   gr_do_core_algo( coreOrder[3], hash_1, hash_2, 64 );
+   gr_do_core_algo( coreOrder[4], hash_2, hash_1, 64 );
+   gr_do_cn_algo  ( cnOrder[0],   hash_1, hash_2, 64 );
    memset( hash_2 + 32, 0, 32 );
 
    // Group 2.
-   doCoreAlgo( coreOrder[5], hash_2, hash_1, 64 );
-   doCoreAlgo( coreOrder[6], hash_1, hash_2, 64 );
-   doCoreAlgo( coreOrder[7], hash_2, hash_1, 64 );
-   doCoreAlgo( coreOrder[8], hash_1, hash_2, 64 );
-   doCoreAlgo( coreOrder[9], hash_2, hash_1, 64 );
-   doCNAlgo  ( cnOrder[1],   hash_1, hash_2, 64 );
+   gr_do_core_algo( coreOrder[5], hash_2, hash_1, 64 );
+   gr_do_core_algo( coreOrder[6], hash_1, hash_2, 64 );
+   gr_do_core_algo( coreOrder[7], hash_2, hash_1, 64 );
+   gr_do_core_algo( coreOrder[8], hash_1, hash_2, 64 );
+   gr_do_core_algo( coreOrder[9], hash_2, hash_1, 64 );
+   gr_do_cn_algo  ( cnOrder[1],   hash_1, hash_2, 64 );
    memset( hash_2 + 32, 0, 32 );
 
    // Group 3.
-   doCoreAlgo( coreOrder[10], hash_2, hash_1, 64 );
-   doCoreAlgo( coreOrder[11], hash_1, hash_2, 64 );
-   doCoreAlgo( coreOrder[12], hash_2, hash_1, 64 );
-   doCoreAlgo( coreOrder[13], hash_1, hash_2, 64 );
-   doCoreAlgo( coreOrder[14], hash_2, hash_1, 64 );
-   doCNAlgo  ( cnOrder[2],    hash_1, hash_2, 64 );
+   gr_do_core_algo( coreOrder[10], hash_2, hash_1, 64 );
+   gr_do_core_algo( coreOrder[11], hash_1, hash_2, 64 );
+   gr_do_core_algo( coreOrder[12], hash_2, hash_1, 64 );
+   gr_do_core_algo( coreOrder[13], hash_1, hash_2, 64 );
+   gr_do_core_algo( coreOrder[14], hash_2, hash_1, 64 );
+   gr_do_cn_algo  ( cnOrder[2],    hash_1, hash_2, 64 );
 
    memcpy( output, hash_2, 32 );
 }
@@ -277,36 +282,36 @@ static void gr_hash_4way( void *const out[GR_CN_LANES],
    uint8_t coreOrder[15], cnOrder[6];
    int l;
 
-   getAlgoString( (const uint8_t*)in[0] + 4, 64, coreOrder, 15 );
-   getAlgoString( (const uint8_t*)in[0] + 4, 64, cnOrder,    6 );
+   gr_get_algo_string((const uint8_t*)in[0] + 4, 64, coreOrder, 15 );
+   gr_get_algo_string((const uint8_t*)in[0] + 4, 64, cnOrder,    6 );
 
    for ( l = 0; l < GR_CN_LANES; l++ )
       { cin[l] = h1[l]; cout[l] = h2[l]; }
 
    // Group 1 (first core round consumes 80 bytes).
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[0], in[l], h1[l], 80 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[1], h1[l], h2[l], 64 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[2], h2[l], h1[l], 64 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[3], h1[l], h2[l], 64 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[4], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[0], in[l], h1[l], 80 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[1], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[2], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[3], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[4], h2[l], h1[l], 64 );
    cryptonight_4way( cnOrder[0], cin, cout, 64 );          // h1 -> h2
    for ( l = 0; l < GR_CN_LANES; l++ ) memset( h2[l] + 32, 0, 32 );
 
    // Group 2.
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[5], h2[l], h1[l], 64 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[6], h1[l], h2[l], 64 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[7], h2[l], h1[l], 64 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[8], h1[l], h2[l], 64 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[9], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[5], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[6], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[7], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[8], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[9], h2[l], h1[l], 64 );
    cryptonight_4way( cnOrder[1], cin, cout, 64 );          // h1 -> h2
    for ( l = 0; l < GR_CN_LANES; l++ ) memset( h2[l] + 32, 0, 32 );
 
    // Group 3.
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[10], h2[l], h1[l], 64 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[11], h1[l], h2[l], 64 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[12], h2[l], h1[l], 64 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[13], h1[l], h2[l], 64 );
-   for ( l = 0; l < GR_CN_LANES; l++ ) doCoreAlgo( coreOrder[14], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[10], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[11], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[12], h2[l], h1[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[13], h1[l], h2[l], 64 );
+   for ( l = 0; l < GR_CN_LANES; l++ ) gr_do_core_algo( coreOrder[14], h2[l], h1[l], 64 );
    cryptonight_4way( cnOrder[2], cin, cout, 64 );          // h1 -> h2
 
    for ( l = 0; l < GR_CN_LANES; l++ ) memcpy( out[l], h2[l], 32 );

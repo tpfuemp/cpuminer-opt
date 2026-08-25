@@ -97,6 +97,7 @@ Supported Algorithms
                           lyra2z        
                           lyra2z330     
                           m7m           
+                          mike          VKAX, FortuneBlock (FTB)
                           minotaur 
                           minotaurx
                           myr-gr        Myriad-Groestl
@@ -231,7 +232,8 @@ Jay D Dee (maintainer):
  BTC: 12tdvfF7KmAsihBXQXynT6E6th2c2pByTT
 
 tpfuemp (argon2id1024, balloon, curvehash, equihash, flex, ghostrider,
-hoohashv110, odo, sha256dv, sha3t, skydoge and verus additions):
+heavyhash, hoohashv110, mike, odo, sha256dv, sha3t, skydoge and verus
+additions):
 
  DOGE: DNQdyeLu9DtRfsZCFvy1GfJTwjWJoSWHLh
 

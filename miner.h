@@ -686,6 +686,7 @@ enum algos {
         ALGO_LYRA2Z,
         ALGO_LYRA2Z330,
         ALGO_M7M,
+        ALGO_MIKE,           /* VKAX, FortuneBlock (FTB)           */
         ALGO_MINOTAUR,
         ALGO_MINOTAURX,
         ALGO_MYR_GR,      
@@ -800,6 +801,7 @@ static const char* const algo_names[] = {
         "lyra2z",
         "lyra2z330",
         "m7m",
+        "mike",
         "minotaur",
         "minotaurx",
         "myr-gr",
@@ -982,6 +984,7 @@ Options:\n\
                           lyra2z\n\
                           lyra2z330     Lyra2 330 rows\n\
                           m7m           Magi (XMG)\n\
+                          mike          VKAX, FortuneBlock (FTB)\n\
                           myr-gr        Myriad-Groestl\n\
                           minotaur\n\
                           minotaurx\n\

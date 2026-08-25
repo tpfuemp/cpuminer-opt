@@ -76,13 +76,14 @@ The supported algorithms group into a few broad families:
 - **Memory-hard** — `scrypt`, `yescrypt`/`yespower` family, `argon2d` family,
   `verthash`.
 - **Equihash** — `equihash` 200/9 and the 96/125/144/192 variants.
-- **CryptoNight-family chains** — GhostRider (`ghostrider`) and Flex (`flex`):
-  hybrids that interleave a set of fast core hashes with memory-hard CryptoNight
-  rounds, with the order derived from the block header.
+- **CryptoNight-family chains** — GhostRider (`ghostrider`), Mike (`mike`) and Flex
+  (`flex`): hybrids that interleave a set of fast core hashes with memory-hard
+  CryptoNight rounds, with the order derived from the block header.
 
 Per-algorithm documentation lives in [`algorithms/`](algorithms/):
 
 - [GhostRider](algorithms/ghostrider.md) — Raptoreum (RTM)
+- [Mike](algorithms/mike.md) — VKAX, FortuneBlock (FTB)
 - [Flex](algorithms/flex.md) — Kylacoin / Lyncoin
 - [x16r and the X16 family](algorithms/x16r.md) — Genix and variants
 - [VerusHash 2.2](algorithms/verus.md) — Verus Coin (VRSC)

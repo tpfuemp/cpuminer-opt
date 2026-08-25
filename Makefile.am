@@ -139,6 +139,7 @@ cpuminer_SOURCES = \
   algo/gr/cryptonote/crypto/c_groestl.c \
   algo/gr/cryptonote/crypto/c_jh.c \
   algo/gr/cryptonote/crypto/c_skein.c \
+  algo/mike/mike-gate.c \
   algo/groestl/groestl-gate.c \
   algo/groestl/groestl512-hash-4way.c \
   algo/groestl/groestl256-hash-4way.c \
