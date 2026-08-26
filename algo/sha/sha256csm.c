@@ -232,6 +232,8 @@ static bool sha256csm_vector_check( void )
    #define csm_vec_bcast   v512_32
    #define csm_vec_zero    memset_zero_512
    #define csm_vec_xform   sha256_16x32_transform_le
+   #define csm_vec_prehash sha256csm_16x32_prehash_3rounds
+   #define csm_vec_final   sha256csm_16x32_final_rounds
    #define csm_vec_extr    extr_lane_16x32
    lanes = 16;
    __m512i noncev = _mm512_set_epi32( n+15, n+14, n+13, n+12, n+11, n+10,
@@ -242,6 +244,8 @@ static bool sha256csm_vector_check( void )
    #define csm_vec_bcast   v256_32
    #define csm_vec_zero    memset_zero_256
    #define csm_vec_xform   sha256_8x32_transform_le
+   #define csm_vec_prehash sha256csm_8x32_prehash_3rounds
+   #define csm_vec_final   sha256csm_8x32_final_rounds
    #define csm_vec_extr    extr_lane_8x32
    lanes = 8;
    __m256i noncev = _mm256_set_epi32( n+7, n+6, n+5, n+4, n+3, n+2, n+1, n );
@@ -250,6 +254,8 @@ static bool sha256csm_vector_check( void )
    #define csm_vec_bcast   v128_32
    #define csm_vec_zero    v128_memset_zero
    #define csm_vec_xform   sha256_4x32_transform_le
+   #define csm_vec_prehash sha256csm_4x32_prehash_3rounds
+   #define csm_vec_final   sha256csm_4x32_final_rounds
    #define csm_vec_extr    extr_lane_4x32
    lanes = 4;
    v128_t noncev = v128_set32( n+3, n+2, n+1, n );
@@ -280,8 +286,45 @@ static bool sha256csm_vector_check( void )
    csm_vec_zero( block+9, 6 );
    block[15] = csm_vec_bcast( CSM_MSG2_BITS );
 
-   csm_vec_xform( block, buf, vmstate );
+   // Mirror whatever the compiled scanhash does, or this proves nothing.
+   // All three SIMD widths now use the csm-specific prehash + final_rounds.
+   CSM_VEC_T mstate2[8]  __attribute__ ((aligned (128)));
+   CSM_VEC_T mexp_pre[8] __attribute__ ((aligned (128)));
+   csm_vec_prehash( mstate2, mexp_pre, buf, vmstate );
+   csm_vec_final( block, buf, vmstate, mstate2, mexp_pre );
    csm_vec_xform( hash32, block, istate );
+
+  #if defined(SHA256CSM_4X32)
+   // The 4x32 scanhash gates on sha256_4x32_transform_le_short, whose early
+   // abort fails silently: a wrong "no lane can win" produces no digest at
+   // all, so no digest comparison can see it. Assert both verdicts.
+   {
+      uint32_t permissive[8], impossible[8];
+      CSM_VEC_T probe[8] __attribute__ ((aligned (128)));
+
+      memset( permissive,  0xff, sizeof permissive  );
+      memset( impossible,  0x00, sizeof impossible  );
+
+      if ( !sha256_4x32_transform_le_short( probe, block, istate, permissive ) )
+      {
+         applog( LOG_ERR, "sha256csm short transform aborted on a target "
+                          "no lane can lose to" );
+         return false;
+      }
+      if ( memcmp( probe, hash32, 8 * sizeof(CSM_VEC_T) ) != 0 )
+      {
+         applog( LOG_ERR, "sha256csm short transform digest differs from the "
+                          "full transform" );
+         return false;
+      }
+      if ( sha256_4x32_transform_le_short( probe, block, istate, impossible ) )
+      {
+         applog( LOG_ERR, "sha256csm short transform completed on a target "
+                          "no lane can win" );
+         return false;
+      }
+   }
+  #endif
 
    for ( int lane = 0; lane < lanes; lane++ )
    {
@@ -303,6 +346,8 @@ static bool sha256csm_vector_check( void )
    #undef csm_vec_bcast
    #undef csm_vec_zero
    #undef csm_vec_xform
+   #undef csm_vec_prehash
+   #undef csm_vec_final
    #undef csm_vec_extr
 
 #elif defined(SHA256CSM_X86_SHA256) || defined(SHA256CSM_NEON_SHA256)
@@ -533,6 +578,8 @@ int scanhash_sha256csm_16x32( struct work *work, const uint32_t max_nonce,
    __m512i  buf[16]      __attribute__ ((aligned (64)));
    __m512i  hash32[8]    __attribute__ ((aligned (64)));
    __m512i  mstate[8]    __attribute__ ((aligned (64)));
+   __m512i  mstate2[8]   __attribute__ ((aligned (64)));
+   __m512i  mexp_pre[8]  __attribute__ ((aligned (64)));
    __m512i  istate[8]    __attribute__ ((aligned (64)));
    uint32_t phash[8]     __attribute__ ((aligned (32)));
    uint32_t *pdata = work->data;
@@ -570,9 +617,13 @@ int scanhash_sha256csm_16x32( struct work *work, const uint32_t max_nonce,
    memset_zero_512( block+9, 6 );
    block[15] = v512_32( CSM_MSG2_BITS );
 
+   // partially pre-expand & prehash the second message block, avoiding the
+   // nonces. csm-specific: the shared helpers assume W[12] == 0.
+   sha256csm_16x32_prehash_3rounds( mstate2, mexp_pre, buf, mstate );
+
    do
    {
-      sha256_16x32_transform_le( block, buf, mstate );
+      sha256csm_16x32_final_rounds( block, buf, mstate, mstate2, mexp_pre );
       if ( unlikely( sha256_16x32_transform_le_short(
                                   hash32, block, istate, ptarget ) ) )
       {
@@ -604,6 +655,8 @@ int scanhash_sha256csm_8x32( struct work *work, const uint32_t max_nonce,
    __m256i  buf[16]      __attribute__ ((aligned (32)));
    __m256i  hash32[8]    __attribute__ ((aligned (32)));
    __m256i  mstate[8]    __attribute__ ((aligned (32)));
+   __m256i  mstate2[8]   __attribute__ ((aligned (32)));
+   __m256i  mexp_pre[8]  __attribute__ ((aligned (32)));
    __m256i  istate[8]    __attribute__ ((aligned (32)));
    uint32_t phash[8]     __attribute__ ((aligned (32)));
    uint32_t *pdata = work->data;
@@ -637,9 +690,11 @@ int scanhash_sha256csm_8x32( struct work *work, const uint32_t max_nonce,
    memset_zero_256( block+9, 6 );
    block[15] = v256_32( CSM_MSG2_BITS );
 
+   sha256csm_8x32_prehash_3rounds( mstate2, mexp_pre, buf, mstate );
+
    do
    {
-      sha256_8x32_transform_le( block, buf, mstate );
+      sha256csm_8x32_final_rounds( block, buf, mstate, mstate2, mexp_pre );
       if ( unlikely( sha256_8x32_transform_le_short( hash32, block,
                                                      istate, ptarget ) ) )
       {
@@ -671,6 +726,8 @@ int scanhash_sha256csm_4x32( struct work *work, const uint32_t max_nonce,
    v128_t   buf[16]      __attribute__ ((aligned (32)));
    v128_t   hash32[8]    __attribute__ ((aligned (32)));
    v128_t   mstate[8]    __attribute__ ((aligned (32)));
+   v128_t   mstate2[8]   __attribute__ ((aligned (32)));
+   v128_t   mexp_pre[8]  __attribute__ ((aligned (32)));
    v128_t   iv[8]        __attribute__ ((aligned (32)));
    uint32_t phash[8]     __attribute__ ((aligned (32)));
    uint32_t *hash32_d7 = (uint32_t*)&( hash32[7] );
@@ -706,11 +763,13 @@ int scanhash_sha256csm_4x32( struct work *work, const uint32_t max_nonce,
    v128_memset_zero( block+9, 6 );
    block[15] = v128_32( CSM_MSG2_BITS );
 
+   sha256csm_4x32_prehash_3rounds( mstate2, mexp_pre, buf, mstate );
+
    do
    {
-      sha256_4x32_transform_le( block, buf, mstate );
-      sha256_4x32_transform_le( hash32, block, iv );
-
+      sha256csm_4x32_final_rounds( block, buf, mstate, mstate2, mexp_pre );
+      if ( unlikely( sha256_4x32_transform_le_short( hash32, block, iv,
+                                                     ptarget ) ) )
       for ( int lane = 0; lane < 4; lane++ )
       {
          if ( unlikely( bswap_32( hash32_d7[ lane ] ) <= targ32_d7 ) )
