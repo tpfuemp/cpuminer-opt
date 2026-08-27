@@ -137,6 +137,7 @@ Supported Algorithms
                           verus         VerusHash 2.2 (Verus Coin)
                           whirlpool
                           whirlpoolx
+                          whirlpoolx2   CapStash (CAP)
                           x11           Dash
                           x11evo        Revolvercoin
                           x11gost       sib (SibCoin)

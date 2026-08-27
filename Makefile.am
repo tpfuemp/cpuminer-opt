@@ -276,6 +276,7 @@ cpuminer_SOURCES = \
   algo/whirlpool/whirlpool-gate.c \
   algo/whirlpool/whirlpool.c \
   algo/whirlpool/whirlpoolx.c \
+  algo/whirlpool/whirlpoolx2.c \
   algo/x11/x11-gate.c \
   algo/x11/x11.c \
   algo/x11/x11-4way.c \

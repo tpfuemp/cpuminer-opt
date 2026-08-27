@@ -104,20 +104,31 @@ vector.** Galleoncoin is PIVX-derived, so a block id is `sha256d` of the header 
 not the proof-of-work hash. The vectors are therefore derived from the algorithm
 definition and labelled as such, rather than taken from chain data.
 
-End-to-end correctness is confirmed by pool-accepted shares on both architectures:
+End-to-end correctness is confirmed by pool-accepted shares on every path:
 
-| Path | Result |
-|---|---|
-| x86-64, AVX-512 16x32 | 7 accepted, 0 rejected |
-| x86-64, AVX2 8x32 | 20 accepted, 0 rejected |
-| x86-64, SSE2 4x32 | 12 accepted, 0 rejected |
-| aarch64, 2-way NEON SHA2 | 3 accepted, 0 rejected |
-| aarch64, NEON 4x32 | 10 accepted, 0 rejected |
+| Path | Toolchain | Result |
+|---|---|---|
+| x86-64, AVX-512 16x32 | gcc | 7 accepted, 0 rejected |
+| x86-64, SHA-NI 2-way | gcc | 21 accepted, 0 rejected |
+| x86-64, AVX2 8x32 | gcc | 20 accepted, 0 rejected |
+| x86-64, SSE2 4x32 | gcc | 12 accepted, 0 rejected |
+| x86-64, scalar | gcc | 6 accepted, 0 rejected |
+| aarch64, 2-way NEON SHA2 | gcc | 3 accepted, 0 rejected |
+| aarch64, 2-way NEON SHA2 | **clang, Android/bionic** | 6 accepted, 0 rejected |
+| aarch64, NEON 4x32 | gcc | 10 accepted, 0 rejected |
 
-Because the paths are compile-exclusive, each was built as its own binary and mined
-separately — a confirmation on one path says nothing about the others. Runs spanned stratum
-difficulties 0.1 to 1.0, which is what establishes that the share target needs no scaling
-factor.
+**85 accepted, 0 rejected — every path, no exceptions.** Because the paths are
+compile-exclusive, each was built as its own binary and mined separately; a confirmation on one
+path says nothing about the others. Runs spanned stratum difficulties 0.1 to 1.0, which is what
+establishes that the share target needs no scaling factor.
+
+The Android row is a separate toolchain rather than a duplicate of the row above it: everything
+else here is gcc against glibc, so the Termux build is the only clang compile and the only
+non-glibc target the algorithm has been through.
+
+Testing the scalar path needs `-DSHA256CSM_FORCE_SCALAR`. On x86-64 `__SSE2__` is baseline, so
+the scalar `#else` branch is unreachable in a normal build; the override compiles exactly the
+branch a target without SSE2 or NEON would select.
 
 ## Performance
 

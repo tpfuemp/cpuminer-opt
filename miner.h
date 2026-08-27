@@ -724,6 +724,7 @@ enum algos {
         ALGO_VERUS,
         ALGO_WHIRLPOOL,
         ALGO_WHIRLPOOLX,
+        ALGO_WHIRLPOOLX2,
         ALGO_X11,
         ALGO_X11EVO,         
         ALGO_X11GOST,
@@ -840,6 +841,7 @@ static const char* const algo_names[] = {
         "verus",
         "whirlpool",
         "whirlpoolx",
+        "whirlpoolx2",
         "x11",
         "x11evo",
         "x11gost",
@@ -1026,6 +1028,7 @@ Options:\n\
                           verus         VerusHash 2.2 (Verus Coin)\n\
                           whirlpool\n\
                           whirlpoolx\n\
+                          whirlpoolx2   CapStash (CAP)\n\
                           x11           Dash\n\
                           x11evo        Revolvercoin (XRE)\n\
                           x11gost       sib (SibCoin)\n\

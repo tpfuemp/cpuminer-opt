@@ -4,7 +4,7 @@
 **Algorithm names:** `sha256d`, `sha256t`, `sha256q`, `sha256dt`, `sha256csm`, `sha512256d`,
 `sha3d`, `keccak`, `keccakc`, `blake`, `blakecoin`, `vanilla`, `blake2s`, `blake2b`,
 `pentablake`, `bmw`, `bmw512`, `groestl`, `dmd-gr`, `myr-gr`, `skein`, `skein2`,
-`whirlpool`, `whirlpoolx`, `nist5`, `quark`, `qubit`, `anime`
+`whirlpool`, `whirlpoolx`, `whirlpoolx2`, `nist5`, `quark`, `qubit`, `anime`
 
 ```
 ./cpuminer -a sha256d -o stratum+tcp://<pool>:<port> -u <wallet> -p x
@@ -75,6 +75,36 @@ merkle root with `sha3d`, `sha3t` uses the ordinary `sha256d`. See [SHA3T](sha3t
 | `bmw512` | BMW-512 | |
 | `whirlpool` | Whirlpool | |
 | `whirlpoolx` | Whirlpool variant | |
+| `whirlpoolx2` | one Whirlpool-512 over the header, folded 512 -> 256 bits | CapStash (CAP) |
+
+### whirlpoolx2 vs whirlpool / whirlpoolx
+
+Despite the name, `whirlpoolx2` applies Whirlpool **once**:
+
+```
+out[i] = wh[i] ^ wh[i+32],  i < 32     where wh = Whirlpool512(80-byte header)
+```
+
+The "x2" is the 512 -> 256 halving, not a second pass. The three algorithms are easy to
+confuse, so in full:
+
+| | primitive | fold offset |
+|---|---|---|
+| `whirlpool` | Whirlpool-1 (2001 revision), 4 passes | none, truncates to 32 bytes |
+| `whirlpoolx` | Whirlpool-1 (2001 revision) | 16 |
+| `whirlpoolx2` | plain Whirlpool (ISO/IEC 10118-3 final) | 32 |
+
+At startup the miner reproduces the four CapStash genesis blocks
+(mainnet/testnet/signet/regtest), which were mined at nBits `0x1d01fffe` against this
+construction, and refuses to run if any digest fails to clear its own target.
+`opt_target_factor` is `1.0`: CapStash compares the digest to nBits directly as a
+little-endian uint256. The Stratum merkle root is the ordinary `sha256d` one.
+
+Pool-confirmed on x86-64 and aarch64: 65 accepted, 0 rejected, 0 stale, at Stratum
+difficulties from 0.01 to 0.5.
+
+Runs 1-way, with a cached Whirlpool midstate over the header's constant first 64 bytes
+(the nonce sits at bytes 76..79) which halves the compressions per nonce.
 
 ## Short fixed chains
 
@@ -91,7 +121,9 @@ A handful of hashes in a fixed order — the small ancestors of the X-chains:
 
 - **SHA-NI** for the SHA-256 algorithms, and wide multi-way SHA-256 (8/16-way on
   AVX2/AVX-512) for scanning many nonces per pass.
-- **AES-NI / VAES** for Groestl and Whirlpool rounds.
+- **AES-NI / VAES** for Groestl rounds. Whirlpool's round shares AES's structure but uses a
+  different S-box and MDS matrix, so it cannot use those instructions: `sph_whirlpool.c` is
+  table-driven scalar C on every target, and the three `whirlpool*` algos run 1-way.
 - **Parallel-lane hashing** (4/8/16-way) for the BLAKE, BMW, Keccak, Skein and
   short-chain algorithms.
 - **Midstate caching** where the first hash's leading block is constant across nonces.

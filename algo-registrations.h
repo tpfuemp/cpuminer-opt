@@ -93,6 +93,7 @@ bool register_verthash_algo( algo_gate_t *gate );
 bool register_verus_algo( algo_gate_t *gate );
 bool register_whirlpool_algo( algo_gate_t *gate );
 bool register_whirlpoolx_algo( algo_gate_t *gate );
+bool register_whirlpoolx2_algo( algo_gate_t *gate );
 bool register_x11_algo( algo_gate_t *gate );
 bool register_x11evo_algo( algo_gate_t *gate );
 bool register_x11gost_algo( algo_gate_t *gate );
