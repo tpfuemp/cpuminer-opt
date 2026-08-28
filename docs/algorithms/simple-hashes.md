@@ -100,11 +100,37 @@ construction, and refuses to run if any digest fails to clear its own target.
 `opt_target_factor` is `1.0`: CapStash compares the digest to nBits directly as a
 little-endian uint256. The Stratum merkle root is the ordinary `sha256d` one.
 
-Pool-confirmed on x86-64 and aarch64: 65 accepted, 0 rejected, 0 stale, at Stratum
-difficulties from 0.01 to 0.5.
+Pool-confirmed on x86-64 and aarch64 across many sessions: 335 accepted, 0 rejected, at
+Stratum difficulties from 0.01 to 0.5.
 
-Runs 1-way, with a cached Whirlpool midstate over the header's constant first 64 bytes
-(the nonce sits at bytes 76..79) which halves the compressions per nonce.
+Runs 1-way. Three optimizations apply, all bit-exact against the reference core, which the
+miner re-checks over 512 nonces at every start:
+
+- a cached Whirlpool midstate over the header's constant first 64 bytes (the nonce sits at
+  bytes 76..79);
+- the ten round keys expanded **once per job** rather than once per nonce -- Whirlpool is a
+  block cipher keyed by the chaining state, and here that state is job-constant, so the key
+  schedule was half the work of every nonce;
+- only the two state words that decide the target comparison are computed in the final
+  round, with the full digest produced only for a nonce that survives that screen.
+
+### whirlpoolx2 tuning: SMT buys nothing here
+
+On an SMT machine, one thread per physical core matches using every logical CPU. Measured on
+an i7-7700K (4 cores / 8 threads), Linux:
+
+| config | MH/s |
+|---|---|
+| `-t 4 --cpu-affinity 0xf` | 29.7 |
+| `-t 8` | 29.9 |
+
+The two are within run-to-run noise, so `-t 4` costs nothing and leaves half the machine free.
+An RK3588S (4x A76 + 4x A55) reaches 22.8 MH/s using all eight cores -- on big.LITTLE use every
+core, the little ones still contribute.
+
+NOTE: this is the opposite of `balloon`, which gains ~54% from SMT. Thread advice does not carry
+between algorithms; measure per algorithm. `--cpu-affinity` is also the only mask that works --
+`taskset` does not constrain cpuminer's threads.
 
 ## Short fixed chains
 
