@@ -686,6 +686,8 @@ enum algos {
         ALGO_LYRA2Z,
         ALGO_LYRA2Z330,
         ALGO_M7M,
+        ALGO_MEGABTX,        /* BitCore (BTX)                      */
+        ALGO_MEGAMEC,        /* Megacoin (MEC)                     */
         ALGO_MIKE,           /* VKAX, FortuneBlock (FTB)           */
         ALGO_MINOTAUR,
         ALGO_MINOTAURX,
@@ -803,6 +805,8 @@ static const char* const algo_names[] = {
         "lyra2z",
         "lyra2z330",
         "m7m",
+        "megabtx",
+        "megamec",
         "mike",
         "minotaur",
         "minotaurx",
@@ -988,6 +992,8 @@ Options:\n\
                           lyra2z\n\
                           lyra2z330     Lyra2 330 rows\n\
                           m7m           Magi (XMG)\n\
+                          megabtx       Mega-BTX, BitCore (BTX)\n\
+                          megamec       Mega-MEC, Megacoin (MEC)\n\
                           mike          VKAX, FortuneBlock (FTB)\n\
                           myr-gr        Myriad-Groestl\n\
                           minotaur\n\

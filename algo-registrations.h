@@ -56,6 +56,8 @@ bool register_lyra2rev3_algo( algo_gate_t *gate );
 bool register_lyra2z_algo( algo_gate_t *gate );
 bool register_lyra2z330_algo( algo_gate_t *gate );
 bool register_m7m_algo( algo_gate_t *gate );
+bool register_megabtx_algo( algo_gate_t *gate );
+bool register_megamec_algo( algo_gate_t *gate );
 bool register_mike_algo( algo_gate_t *gate );
 bool register_minotaur_algo( algo_gate_t *gate );
 bool register_myriad_algo( algo_gate_t *gate );

@@ -60,8 +60,10 @@ Supported Algorithms
                           argon2d250    
                           argon2d500
                           argon2d1000
+                          argon2d16000
                           argon2d4096
                           argon2id1024  Bitweb (WEB)
+                          axiom         Shabal-256 MemoHash
                           balloon       Mateable (MTBC)
                           blake         Blake-256
                           blake2b       Blake2-512
@@ -71,7 +73,6 @@ Supported Algorithms
                           bmw512        BMW 512
                           c11           
                           curvehash     Pulsar (PLSR), alias curve
-                          decred
                           deep          Deepcoin (DCN)
                           dmd-gr        Diamond-Groestl
                           equihash      Equihash 200/9 (Zcash, Horizen, Komodo)
@@ -97,6 +98,8 @@ Supported Algorithms
                           lyra2z        
                           lyra2z330     
                           m7m           
+                          megabtx       Mega-BTX, BitCore (BTX)
+                          megamec       Mega-MEC, Megacoin (MEC)
                           mike          VKAX, FortuneBlock (FTB)
                           minotaur 
                           minotaurx
@@ -195,7 +198,9 @@ Errata
 Old algorithms that are no longer used frequently will not have the latest
 optimizations.
 
-Cryptonight and variants are no longer supported, use another miner.
+Standalone Cryptonight algos are no longer supported, use another miner. The
+algos that embed CryptoNight cores as one stage of a chain, gr (Raptoreum) and
+mike (VKAX, FortuneBlock), are supported.
 
 Neoscrypt crashes on Windows, use legacy version.
 
@@ -203,9 +208,6 @@ AMD CPUs older than Piledriver, including Athlon x2 and Phenom II x4, are not
 supported by cpuminer-opt due to an incompatible implementation of SSE2 on
 these CPUs. Some algos may crash the miner with an invalid instruction.
 Users are recommended to use an unoptimized miner such as cpuminer-multi.
-
-cpuminer-opt does not work mining Decred algo at Nicehash and produces
-only "invalid extranonce2 size" rejects.
 
 Benchmark testing does not work for x11evo.
 
@@ -234,8 +236,8 @@ Jay D Dee (maintainer):
  BTC: 12tdvfF7KmAsihBXQXynT6E6th2c2pByTT
 
 tpfuemp (argon2id1024, balloon, curvehash, equihash, flex, ghostrider,
-heavyhash, hoohashv110, mike, odo, sha256dv, sha3t, skydoge and verus
-additions):
+heavyhash, hoohashv110, megabtx, megamec, mike, odo, sha256dv, sha3t, skydoge
+and verus additions):
 
  DOGE: DNQdyeLu9DtRfsZCFvy1GfJTwjWJoSWHLh
 
