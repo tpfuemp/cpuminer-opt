@@ -25,6 +25,7 @@
 #include "algo/groestl/aes_ni/hash-groestl.h"
 #include "algo/echo/aes_ni/hash_api.h"
 #include "algo/fugue/fugue-aesni.h"
+#include "algo/fugue/fugue-hash-4way.h"
 
 /* 4x64 interleaved megabtx.
  *
@@ -56,6 +57,12 @@ union _megabtx_4way_context_overlay
    hashState_groestl       groestl;
    hashState_echo          echo;
    hashState_fugue         fugue;
+#if defined(FUGUE_4X128)
+   fugue512_4x128_context  fugue4;
+#endif
+#if defined(FUGUE_2X128)
+   fugue512_2x128_context  fugue2;
+#endif
    sph_whirlpool_context   whirlpool;
    sph_gost512_context     gost;
 };
@@ -202,11 +209,31 @@ static void m4_echo( CTX, VH )
    #undef E
 }
 
+// fugue has an n-way kernel: prefer 4 lanes per call, then 2, then per-lane.
 static void m4_fugue( CTX, VH )
 {
+#if defined(FUGUE_4X128)
+   uint64_t h0[8] __attribute__ ((aligned (64)));
+   uint64_t h1[8] __attribute__ ((aligned (64)));
+   uint64_t h2[8] __attribute__ ((aligned (64)));
+   uint64_t h3[8] __attribute__ ((aligned (64)));
+   dintrlv_4x64_512( h0, h1, h2, h3, vhash );
+   fugue512_4x128_full( &ctx->fugue4, h0, h1, h2, h3, h0, h1, h2, h3, 64 );
+   intrlv_4x64_512( vhash, h0, h1, h2, h3 );
+#elif defined(FUGUE_2X128)
+   uint64_t h0[8] __attribute__ ((aligned (64)));
+   uint64_t h1[8] __attribute__ ((aligned (64)));
+   uint64_t h2[8] __attribute__ ((aligned (64)));
+   uint64_t h3[8] __attribute__ ((aligned (64)));
+   dintrlv_4x64_512( h0, h1, h2, h3, vhash );
+   fugue512_2x128_full( &ctx->fugue2, h0, h1, h0, h1, 64 );
+   fugue512_2x128_full( &ctx->fugue2, h2, h3, h2, h3, 64 );
+   intrlv_4x64_512( vhash, h0, h1, h2, h3 );
+#else
    #define F(h) fugue512_full( &ctx->fugue, h, h, 64 )
    VIA_SCALAR( F );
    #undef F
+#endif
 }
 
 static void m4_whirlpool( CTX, VH )

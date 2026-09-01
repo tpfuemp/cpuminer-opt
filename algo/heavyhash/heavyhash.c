@@ -226,7 +226,7 @@ void heavyhash_hash( void *output, const void *input )
    heavyhash_core( (const uint32_t (*)[64])matrix, input, output );
 }
 
-/* ===================== byte-packed matrix path (B-04 / D-04) ==============
+/* ===================== byte-packed matrix path ===========================
  * Every matrix entry is 0..15, so uint8 storage is both 4 KB instead of 16 KB
  * and the operand form the byte-multiply instructions want. Two measured
  * results decided the shape of the code below:
@@ -240,7 +240,7 @@ void heavyhash_hash( void *output, const void *input )
  *     UDOT/UMLAL better than hand-rolled accumulator blocking. So ARM gets no
  *     intrinsics at all -- see the note on v128_maddw8 in simd-neon.h.
  *
- * The packing is per job, not per nonce (A-01), so its cost is not in the loop.
+ * The packing is per job, not per nonce, so its cost is not in the loop.
  * Bit-exactness is not a judgement call here: the operands are integers and
  * every form computes the same sum, which register_heavyhash_algo checks
  * against the consensus KATs through this path on every start.
@@ -280,7 +280,7 @@ void heavyhash_hash( void *output, const void *input )
 
 #if defined(HH_BYTE_MATVEC)
 
-/* F-02. Every call site passes distinct objects: the matrix is thread-local,
+/* Every call site passes distinct objects: the matrix is thread-local,
  * the nibble/product/digest buffers are locals, and `output` is always a
  * caller buffer that is never one of them -- so the aliasing the compiler must
  * otherwise assume (a store to `xored` invalidating `first` or `product`)
@@ -291,9 +291,9 @@ void heavyhash_hash( void *output, const void *input )
 #define HH_RST restrict
 #endif
 
-// sha3_256_prepad80/32 (A-05). Included here rather than at the top of the file
+// sha3_256_prepad80/32. Included here rather than at the top of the file
 // because this header needs v128_t: every target with a byte path has it, but
-// heavyhash.c is also expected to compile under -mno-sse2 (C-06), where it does
+// heavyhash.c is also expected to compile under -mno-sse2, where it does
 // not exist and where none of this code is built anyway.
 #include "../keccak/keccak-hash-4way.h"
 
@@ -375,7 +375,7 @@ static void heavyhash_matrix_pack( const uint32_t m[64][64], uint8_t *p )
             p[cb*256 + row*4 + c] = (uint8_t)m[row][4*cb + c];
 }
 
-/* No standalone hh_matvec for this layout: A-09 showed that narrowing the
+/* No standalone hh_matvec for this layout: measurement showed that narrowing the
  * 32-bit products to 16 and storing them, only for the pack loop to read them
  * straight back two bytes at a time, is a store-forwarding stall costing more
  * than the pack itself. The DP4 kernel is therefore fused into hh_middle below
@@ -535,8 +535,8 @@ static void heavyhash_core_packed( const uint8_t *HH_RST packed,
    uint8_t _ALIGN(64) hash_first[32];
    uint8_t _ALIGN(64) hash_xored[32];
 
-   // -DHH_NO_PREPAD restores the sph path so A-05 can be A/B'd from one source,
-   // the same ablation pattern as HH_NO_BYTE_MATVEC and HH_NO_NWAY.
+   // -DHH_NO_PREPAD restores the sph path, so the prepad can be compared from
+   // one source -- same ablation pattern as HH_NO_BYTE_MATVEC and HH_NO_NWAY.
 #if defined(HH_NO_PREPAD)
    sph_keccak256_context ctx;
    sph_keccak256_init( &ctx );
@@ -565,7 +565,7 @@ static void heavyhash_core_packed( const uint8_t *HH_RST packed,
 #endif
 }
 
-/* ============== n-way keccak across nonces (item 1, B-01/B-02) =============
+/* ============== n-way keccak across nonces =================================
  * After the byte-matrix work the two keccak permutations dominate a nonce on
  * x86, so they are batched across nonces using the existing keccak256_Nx64
  * cores. Widest available wins on x86 (8-way > 4-way > 2-way); 512-bit
@@ -585,13 +585,13 @@ static void heavyhash_core_packed( const uint8_t *HH_RST packed,
  * hh_matvec to call and such CPUs predate 2006.
  */
 /* -DHH_NO_NWAY leaves the 1-way driver, for a paired A/B from one source.
- * -DHH_NWAY_FORCE=N pins the width; otherwise the widest available is used. */
+ * -DHH_FORCE_NWAY=N pins the width; otherwise the widest available is used. */
 /* Gated on "x86 has a byte path", not on one particular layout: the DP4 layout
  * arrived later and gating on COLPAIR would have silently disabled n-way on
  * exactly the CPUs that benefit from it most. */
 #if defined(HH_BYTE_MATVEC) && !defined(HH_MATVEC_ROWMAJOR) && !defined(HH_NO_NWAY)
-#  if defined(HH_NWAY_FORCE)
-#    define HH_NWAY HH_NWAY_FORCE
+#  if defined(HH_FORCE_NWAY)
+#    define HH_NWAY HH_FORCE_NWAY
 #  elif defined(SIMD512)
 #    define HH_NWAY 8
 #  elif defined(__AVX2__)
@@ -715,7 +715,7 @@ bool heavyhash_self_test( void )
    }
 
 #if defined(HH_BYTE_MATVEC)
-   // V-01 as a start-up gate, not just a bench-time claim: the byte path is
+   // A start-up gate, not just a bench-time claim: the byte path is
    // checked against the same consensus constants, on whatever build and
    // whatever CPU the miner actually came up on. That also covers the runtime
    // dotprod choice, which no compile-time test can reach.
@@ -809,7 +809,7 @@ bool heavyhash_self_test( void )
 //
 // Where a byte path exists the cache holds the 4 KB packed form and the uint32
 // matrix is only scratch for generation and the rank check. It stays in TLS
-// rather than on the stack because that is where A-01 put it (D-08); the extra
+// rather than on the stack, where the per-job packing already puts it; the extra
 // 16 KB per thread is touched once per job, not per nonce.
 #if defined(HH_BYTE_MATVEC)
 static __thread uint8_t  _ALIGN(64) hh_cached_packed[HH_PACKED_BYTES];

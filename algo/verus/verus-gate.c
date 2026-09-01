@@ -40,7 +40,7 @@
  * with the other's work: whole miner, all cores busy, A76 cluster +15.0%, A55
  * +0.1%, x86 -t 16 -7.6% (SMT already fills them) -- hence aarch64 only.
  * WARNING: Measure it loaded, never per core: isolated it reads A76 -7% and A55 +7%
- * *worse*. FORCE_* first, so both paths stay testable in every build (V-08). */
+ * *worse*. FORCE_* first, so both paths stay testable in every build. */
 #if defined(FORCE_VERUS_2WAY)
 #define VRS_LANES 2
 #define VRS_LANES_DESC "2 nonces interleaved (forced by FORCE_VERUS_2WAY)"

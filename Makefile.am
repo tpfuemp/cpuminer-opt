@@ -295,6 +295,7 @@ cpuminer_SOURCES = \
   algo/x11/timetravel10-gate.c \
   algo/x11/timetravel10.c \
   algo/x11/timetravel10-4way.c \
+  algo/fugue/fugue-hash-4way.c \
   algo/x11/megabtx-gate.c \
   algo/x11/megabtx.c \
   algo/x11/megabtx-4way.c \
