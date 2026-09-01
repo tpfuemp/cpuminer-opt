@@ -71,6 +71,7 @@ bool register_polytimos_algo( algo_gate_t *gate );
 bool register_power2b_algo( algo_gate_t *gate );
 bool register_quark_algo( algo_gate_t *gate );
 bool register_qubit_algo( algo_gate_t *gate );
+bool register_rinhash_algo( algo_gate_t *gate );
 bool register_scrypt_algo( algo_gate_t *gate );
 bool register_sha256csm_algo( algo_gate_t *gate );
 bool register_sha256d_algo( algo_gate_t *gate );

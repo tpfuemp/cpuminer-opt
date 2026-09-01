@@ -701,7 +701,8 @@ enum algos {
         ALGO_POLYTIMOS,
         ALGO_POWER2B,
         ALGO_QUARK,
-        ALGO_QUBIT,       
+        ALGO_QUBIT,
+        ALGO_RINHASH,
         ALGO_SCRYPT,
         ALGO_SHA256CSM,
         ALGO_SHA256D,
@@ -821,6 +822,7 @@ static const char* const algo_names[] = {
         "power2b",
         "quark",
         "qubit",
+        "rinhash",
         "scrypt",
         "sha256csm",
         "sha256d",
@@ -1008,6 +1010,7 @@ Options:\n\
                           power2b       MicroBitcoin (MBC)\n\
                           quark         Quark\n\
                           qubit         Qubit\n\
+                          rinhash       RinCoin (RIN)\n\
                           scrypt        scrypt(1024, 1, 1) (default)\n\
                           scrypt:N      scrypt(N, 1, 1)\n\
                           scryptn2      scrypt(1048576, 1,1)\n\

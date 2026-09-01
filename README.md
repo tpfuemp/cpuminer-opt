@@ -114,6 +114,7 @@ Supported Algorithms
                           power2b       MicroBitcoin (MBC)
                           quark         Quark
                           qubit         Qubit
+                          rinhash       RinCoin (RIN)
                           scrypt        scrypt(1024, 1, 1) (default)
                           scrypt:N      scrypt(N, 1, 1)
                           scryptn2      scrypt(1048576, 1, 1)
