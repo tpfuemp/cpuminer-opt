@@ -718,6 +718,7 @@ enum algos {
         ALGO_SKUNK,
         ALGO_SKYDOGE,
         ALGO_SONOA,
+        ALGO_SOTERG,
         ALGO_TIMETRAVEL,
         ALGO_TIMETRAVEL10,
         ALGO_TRIBUS,
@@ -838,6 +839,7 @@ static const char* const algo_names[] = {
         "skunk",
         "skydoge",
         "sonoa",
+        "soterg",
         "timetravel",
         "timetravel10",
         "tribus",
@@ -1028,6 +1030,7 @@ Options:\n\
                           skunk         Signatum (SIGT)\n\
                           skydoge       SkyDoge\n\
                           sonoa         Sono\n\
+                          soterg        Soteria (SOTER)\n\
                           timetravel    timeravel8, Machinecoin (MAC)\n\
                           timetravel10  Bitcore (BTX)\n\
                           tribus        Denarius (DNR)\n\

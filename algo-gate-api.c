@@ -376,6 +376,7 @@ case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_SKUNK:        rc = register_skunk_algo         ( gate ); break;
     case ALGO_SKYDOGE:      rc = register_skydoge_algo       ( gate ); break;
     case ALGO_SONOA:        rc = register_sonoa_algo         ( gate ); break;
+    case ALGO_SOTERG:       rc = register_soterg_algo        ( gate ); break;
     case ALGO_TIMETRAVEL:   rc = register_timetravel_algo    ( gate ); break;
     case ALGO_TIMETRAVEL10: rc = register_timetravel10_algo  ( gate ); break;
     case ALGO_TRIBUS:       rc = register_tribus_algo        ( gate ); break;
@@ -469,6 +470,8 @@ const char* const algo_alias_map[][2] =
   { "myriad",            "myr-gr"         },
   { "neo",               "neoscrypt"      },
   { "rin",               "rinhash"        },
+  { "x12r",              "soterg"         },
+  { "soter",             "soterg"         },
   { "phi",               "phi1612"        },
   { "scryptn2",          "scrypt:1048576" },
   { "sha3-256t",         "sha3t"          },   /* pool-side name          */

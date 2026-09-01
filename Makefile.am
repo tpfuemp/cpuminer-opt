@@ -337,6 +337,8 @@ cpuminer_SOURCES = \
   algo/x16/x16r.c \
   algo/x16/x16r-4way.c \
   algo/x16/x16rv2.c \
+  algo/x16/soterg.c \
+  algo/x16/soterg-4way.c \
   algo/x16/x16rv2-4way.c \
   algo/x16/x16rt.c \
   algo/x16/x16rt-4way.c \

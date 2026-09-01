@@ -132,6 +132,7 @@ Supported Algorithms
                           skunk         Signatum (SIGT)
                           skydoge       SkyDoge
                           sonoa         Sono
+                          soterg        Soteria (SOTER)
                           timetravel    Machinecoin (MAC)
                           timetravel10  Bitcore
                           tribus        Denarius (DNR)

@@ -87,6 +87,7 @@ bool register_skein2_algo( algo_gate_t *gate );
 bool register_skunk_algo( algo_gate_t *gate );
 bool register_skydoge_algo( algo_gate_t *gate );
 bool register_sonoa_algo( algo_gate_t *gate );
+bool register_soterg_algo( algo_gate_t *gate );
 bool register_timetravel_algo( algo_gate_t *gate );
 bool register_timetravel10_algo( algo_gate_t *gate );
 bool register_tribus_algo( algo_gate_t *gate );
