@@ -5,12 +5,11 @@
 #include "yespower.h"
 
 /*
- * yespower / yescrypt known-answer tests -- upstream's own published vectors.
+ * yespower / yescrypt known-answer tests.
  *
- * Source: the vendored `tests.c` + `TESTS-OK` that ship in this directory,
- * i.e. Solar Designer's yespower reference distribution. `tests.c` hashes the
- * fixed 80-byte input `src[i] = i * 3` for each (version, N, r, pers) tuple and
- * `TESTS-OK` records the digest, so every vector below is reproducible by
+ * Vectors 1-14 are upstream's own published ones. The 15th covers minotaurx's
+ * parameters, derived from a real Pulsar block because upstream publishes no
+ * vector for them, so this file is no longer purely upstream's.
  * building upstream unmodified -- they are not self-generated.
  *
  * Why this matters here: ~10 registered algos share ONE source file compiled
@@ -38,6 +37,11 @@ typedef struct
     * personalizes with the header, and the pool says the optimized path is
     * what the chain computes. */
    int                   ref_differs;
+   /* Optional per-vector input. NULL means "use the shared 80-byte
+    * yespower_kat_input()". minotaurx is the only consumer that calls yespower
+    * with srclen != 80, so it needs its own. */
+   const uint8_t        *src;
+   uint32_t              srclen;
 } yespower_kat_t;
 
 /* The upstream test input: src[i] = i * 3, truncated to 8 bits. */
@@ -45,6 +49,21 @@ static inline void yespower_kat_input( uint8_t src[80] )
 {
    for ( int i = 0; i < 80; i++ ) src[i] = (uint8_t)( i * 3 );
 }
+
+/* minotaurx's node-21 input: the 64-byte chain state for Pulsar mainnet
+ * block 7920000. Node 21 is terminal, so yespower's result is that block's
+ * published digest -- which makes the pair self-validating, and it was
+ * cross-checked against yespower_ref(). Upstream publishes no vector for
+ * these parameters. */
+static const uint8_t yespower_kat_minotaurx_in[64] =
+{
+   0x96, 0x76, 0x7d, 0xec, 0xb8, 0x25, 0x3e, 0xae, 0xed, 0xa2, 0xb9, 0x8a,
+   0x57, 0xe7, 0xa0, 0x9c, 0xe8, 0x81, 0x02, 0x09, 0x8f, 0x03, 0x23, 0x91,
+   0xb8, 0xbb, 0x52, 0x0e, 0x4f, 0xa6, 0xf9, 0x74, 0xee, 0x11, 0x6a, 0xd3,
+   0x38, 0x8c, 0xc4, 0x6b, 0x18, 0x12, 0x0d, 0x6d, 0xbf, 0x09, 0x76, 0x16,
+   0x63, 0x04, 0xf9, 0x25, 0x15, 0x36, 0xf9, 0x73, 0x95, 0x3f, 0xc8, 0x6b,
+   0x20, 0xd8, 0x23, 0x78
+};
 
 static const yespower_kat_t yespower_kats[] =
 {
@@ -129,6 +148,12 @@ static const yespower_kat_t yespower_kats[] =
    YESPOWER_1_0, 1024, 32, "personality test", 0,
    { 0x1f,0x02,0x69,0xac, 0xf5,0x65,0xc4,0x9a, 0xdc,0x0e,0xf9,0xb8, 0xf2,0x6a,0xb3,0x80,
      0x8c,0xdc,0x38,0x39, 0x4a,0x25,0x4f,0xdd, 0xee,0xdc,0xc3,0xaa, 0xcf,0xf6,0xad,0x9d } },
+   { "minotaurx (1.0, 2048, 8, arcadia, len 64)  REGISTERED",
+     YESPOWER_1_0, 2048, 8, "et in arcadia ego", 0,
+     { 0x94, 0x25, 0x79, 0x71, 0x53, 0x6b, 0x29, 0x5d, 0xb0, 0x94, 0xa9, 0xe1,
+       0x71, 0xfa, 0x82, 0x9e, 0x79, 0xd3, 0x75, 0x3b, 0x27, 0x35, 0xfe, 0xc8,
+       0xd4, 0xe7, 0x2b, 0xf5, 0xfc, 0x05, 0x00, 0x00 }, 0,
+     yespower_kat_minotaurx_in, 64 },
 };
 
 #define YESPOWER_NUM_KATS ( sizeof(yespower_kats) / sizeof(yespower_kats[0]) )

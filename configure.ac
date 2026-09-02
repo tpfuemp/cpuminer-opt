@@ -53,6 +53,55 @@ case $target in
     ;;
 esac
 
+# The ARMv8 crypto extension is selected at compile time only: the hardware AES
+# and SHA-256 paths are gated on __ARM_FEATURE_AES/__ARM_FEATURE_SHA2 with no
+# runtime fallback, so a build with no arch flag silently drops all of them.
+# Add one when the CPU has the extension and the user has not already chosen a
+# -march/-mcpu. Only /proc/cpuinfo may enable +crypto: a flag that merely
+# compiles proves nothing about the CPU, and guessing wrong is a SIGILL.
+if test x$have_arm64 = xtrue; then
+  arm_user_arch=no
+  case " $CFLAGS " in
+    *" -march="*|*" -mcpu="*) arm_user_arch=yes ;;
+  esac
+  AC_MSG_CHECKING([aarch64 architecture flags])
+  if test x$arm_user_arch = xyes; then
+    AC_MSG_RESULT([set in CFLAGS, unchanged])
+  elif test x$cross_compiling = xyes; then
+    AC_MSG_RESULT([none, cross compiling: pass CFLAGS=-march=...])
+  else
+    arm_feat=`grep -m1 -i '^Features' /proc/cpuinfo 2>/dev/null`
+    arm_cands=
+    case $arm_feat in
+      *aes*pmull*|*pmull*aes*)
+        case $arm_feat in
+          *sha3*) arm_cands="-march=armv8-a+crypto+sha3" ;;
+        esac
+        arm_cands="$arm_cands -march=armv8-a+crypto"
+        ;;
+    esac
+    arm_arch=
+    arm_save_cflags="$CFLAGS"
+    for arm_cand in $arm_cands; do
+      CFLAGS="$arm_save_cflags $arm_cand"
+      dnl Require the feature macros, not just a flag the driver accepts.
+      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+#if !defined(__ARM_FEATURE_AES) || !defined(__ARM_FEATURE_SHA2)
+#error arch flag did not enable the crypto extension
+#endif
+      ]], [[]])], [arm_arch="$arm_cand"])
+      test -n "$arm_arch" && break
+    done
+    CFLAGS="$arm_save_cflags"
+    if test -n "$arm_arch"; then
+      CFLAGS="$CFLAGS $arm_arch"
+      AC_MSG_RESULT([$arm_arch])
+    else
+      AC_MSG_RESULT([none, no ARM crypto extension reported: pass CFLAGS=-march=... to override])
+    fi
+  fi
+fi
+
 PTHREAD_FLAGS="-pthread"
 WS2_LIBS=""
 

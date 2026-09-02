@@ -6512,6 +6512,74 @@ case $target in
     ;;
 esac
 
+# The ARMv8 crypto extension is selected at compile time only: the hardware AES
+# and SHA-256 paths are gated on __ARM_FEATURE_AES/__ARM_FEATURE_SHA2 with no
+# runtime fallback, so a build with no arch flag silently drops all of them.
+# Add one when the CPU has the extension and the user has not already chosen a
+# -march/-mcpu. Only /proc/cpuinfo may enable +crypto: a flag that merely
+# compiles proves nothing about the CPU, and guessing wrong is a SIGILL.
+if test x$have_arm64 = xtrue; then
+  arm_user_arch=no
+  case " $CFLAGS " in
+    *" -march="*|*" -mcpu="*) arm_user_arch=yes ;;
+  esac
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking aarch64 architecture flags" >&5
+printf %s "checking aarch64 architecture flags... " >&6; }
+  if test x$arm_user_arch = xyes; then
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: set in CFLAGS, unchanged" >&5
+printf "%s\n" "set in CFLAGS, unchanged" >&6; }
+  elif test x$cross_compiling = xyes; then
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: none, cross compiling: pass CFLAGS=-march=..." >&5
+printf "%s\n" "none, cross compiling: pass CFLAGS=-march=..." >&6; }
+  else
+    arm_feat=`grep -m1 -i '^Features' /proc/cpuinfo 2>/dev/null`
+    arm_cands=
+    case $arm_feat in
+      *aes*pmull*|*pmull*aes*)
+        case $arm_feat in
+          *sha3*) arm_cands="-march=armv8-a+crypto+sha3" ;;
+        esac
+        arm_cands="$arm_cands -march=armv8-a+crypto"
+        ;;
+    esac
+    arm_arch=
+    arm_save_cflags="$CFLAGS"
+    for arm_cand in $arm_cands; do
+      CFLAGS="$arm_save_cflags $arm_cand"
+            cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+#if !defined(__ARM_FEATURE_AES) || !defined(__ARM_FEATURE_SHA2)
+#error arch flag did not enable the crypto extension
+#endif
+
+int
+main (void)
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"
+then :
+  arm_arch="$arm_cand"
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+      test -n "$arm_arch" && break
+    done
+    CFLAGS="$arm_save_cflags"
+    if test -n "$arm_arch"; then
+      CFLAGS="$CFLAGS $arm_arch"
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $arm_arch" >&5
+printf "%s\n" "$arm_arch" >&6; }
+    else
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: none, no ARM crypto extension reported: pass CFLAGS=-march=... to override" >&5
+printf "%s\n" "none, no ARM crypto extension reported: pass CFLAGS=-march=... to override" >&6; }
+    fi
+  fi
+fi
+
 PTHREAD_FLAGS="-pthread"
 WS2_LIBS=""
 

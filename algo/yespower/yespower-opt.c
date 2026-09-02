@@ -592,16 +592,13 @@ typedef struct {
 
 #define DECL_SMASK2REG uint64_t Smask2reg = Smask2;
 
-/*
-#define FORCE_REGALLOC_1 \
-	__asm__("" : "=a" (x), "+d" (Smask2reg), "+S" (S0), "+D" (S1));
-#define FORCE_REGALLOC_2 \
-	__asm__("" : : "c" (lo));
-*/
-
+// FORCE_REGALLOC_1/2 are defined below, outside this pass-1-only section,
+// because their value has to differ between the two passes.
 #define PWXFORM_SIMD(X) { \
 	uint64_t x; \
+	FORCE_REGALLOC_1 \
 	uint32_t lo = x = EXTRACT64(X) & Smask2reg; \
+	FORCE_REGALLOC_2 \
 	uint32_t hi = x >> 32; \
 	X = v128_mulw32( v128_shuflr32(X), X ); \
 	X = v128_add64( X, *(v128_t *)(S0 + lo) ); \
@@ -659,6 +656,28 @@ typedef struct {
 #undef Smask2
 #define Smask2 Smask2_1_0
 
+#endif
+
+// Upstream pins x, Smask2reg, S0, S1 and lo to fixed registers inside
+// PWXFORM_SIMD: empty asm that emits nothing and only constrains the
+// allocator. On for the v0.5 pass always, and for v1.0 only where 512-bit
+// vectors exist -- it gains on v0.5 and on AVX-512 v1.0, and loses on v1.0
+// without them.
+//
+// It must be defined HERE, outside the `_YESPOWER_OPT_C_PASS_ == 1` section:
+// that section is skipped on the pass-2 self-include but its macros persist,
+// so defining it in there would leave pass 2 using the pass-1 asm.
+#undef FORCE_REGALLOC_1
+#undef FORCE_REGALLOC_2
+#if defined(__x86_64__) && defined(__GNUC__) && !defined(__ICC) \
+    && ( _YESPOWER_OPT_C_PASS_ == 1 || defined(SIMD512) )
+#define FORCE_REGALLOC_1 \
+	__asm__("" : "=a" (x), "+d" (Smask2reg), "+S" (S0), "+D" (S1));
+#define FORCE_REGALLOC_2 \
+	__asm__("" : : "c" (lo));
+#else
+#define FORCE_REGALLOC_1 /* empty */
+#define FORCE_REGALLOC_2 /* empty */
 #endif
 
 /**
@@ -961,12 +980,13 @@ static void smix2(uint8_t *B, size_t r, uint32_t N, uint32_t Nloop,
 		} while (Nloop -= 2);
 #if _YESPOWER_OPT_C_PASS_ == 1
 	} else {
-		do {
-			const salsa20_blk_t * V_j = &V[j * s];
-			j = blockmix_xor(X, V_j, Y, r, ctx) & (N - 1);
-			V_j = &V[j * s];
-			j = blockmix_xor(Y, V_j, X, r, ctx) & (N - 1);
-		} while (Nloop -= 2);
+		/* Upstream 1.0.1 simplified this case: smix() passes a literal 2, so the
+		 * generic do/while ran exactly one iteration and the trailing mask of an
+		 * already-dead j was overhead. */
+		const salsa20_blk_t *V_j = &V[j * s];
+		j = blockmix_xor(X, V_j, Y, r, ctx) & (N - 1);
+		V_j = &V[j * s];
+		blockmix_xor(Y, V_j, X, r, ctx);
 	}
 #endif
 

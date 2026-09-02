@@ -92,10 +92,18 @@ $ make -j n
 
 n is the number of threads.
 
-On aarch64 use build-armv8.sh, or pass the arch flags manually, for example
+On aarch64 configure adds "-march=armv8-a+crypto" by itself when building
+natively on a CPU that reports the crypto extension and no -march or -mcpu is
+already present in CFLAGS. "+crypto" enables the hardware AES and SHA2 paths;
+without it the algorithms that require them are compiled out, which costs 23%
+on minotaur and over 3x on verus.
+
+Nothing is added when cross compiling, or when the CPU does not report the
+extension (a Cortex-A53 or A72 for instance), because these paths are selected
+at compile time with no runtime fallback and the wrong flag is a SIGILL rather
+than a slow build. In those cases, and to select a more specific target, use
+build-armv8.sh or pass the flags manually, for example
 CFLAGS="-O3 -march=armv8-a+crypto -Wall -flax-vector-conversions".
-"+crypto" enables the hardware AES and SHA2 paths; without it the algorithms
-that require them are compiled out.
 
 
 4b. Build on Termux (Android, aarch64)

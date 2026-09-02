@@ -68,10 +68,15 @@ static bool yespower_kat_hash( const yespower_kat_t *v, const uint8_t src[80],
 {
    yespower_params_t p;
 
+   // A vector may carry its own input; minotaurx is the only consumer that
+   // calls yespower with srclen != 80.
+   const uint8_t *in    = v->src ? v->src : src;
+   const size_t   inlen = v->src ? v->srclen : 80;
+
    p.version = v->version;
    p.N       = v->N;
    p.r       = v->r;
-   if ( v->pers_is_src )   { p.pers = src;                    p.perslen = 80; }
+   if ( v->pers_is_src )   { p.pers = in;                     p.perslen = inlen; }
    else if ( v->pers )     { p.pers = (const uint8_t*)v->pers;
                              p.perslen = strlen( v->pers ); }
    else                    { p.pers = NULL;                   p.perslen = 0;  }
@@ -80,10 +85,14 @@ static bool yespower_kat_hash( const yespower_kat_t *v, const uint8_t src[80],
    // (yespower-opt.c, srclen == 80 branch), so the KAT must do the same. That
    // makes this a test of the prehash optimization too: upstream computed
    // these digests without one.
-   sha256_ctx_init( &sha256_prehash_ctx );
-   sha256_update( &sha256_prehash_ctx, src, 64 );
+   // The prehash contract applies only to the srclen == 80 branch.
+   if ( inlen == 80 )
+   {
+      sha256_ctx_init( &sha256_prehash_ctx );
+      sha256_update( &sha256_prehash_ctx, src, 64 );
+   }
 
-   return YESPOWER_KAT_FN( local, src, 80, &p, (yespower_binary_t*)out, 0 ) == 1;
+   return YESPOWER_KAT_FN( local, in, inlen, &p, (yespower_binary_t*)out, 0 ) == 1;
 }
 
 static void yespower_kat_log( const char *what, const uint8_t *got,
@@ -128,13 +137,22 @@ const char *yespower_self_test( void )
    // it, so between them they prove the digest depends on both halves of the
    // header -- a prehash wrongly cached across headers would pass every vector
    // above and fail here.
-   memcpy( ref, out, 32 );        // last vector's digest
+   // Pick the last vector that uses the SHARED input. A vector carrying its own
+   // `src` ignores `alt` entirely, so perturbing alt would leave its digest
+   // unchanged and this check would report the KAT vacuous when it is not.
+   size_t nv = 0;
+   for ( size_t i = 0; i < YESPOWER_NUM_KATS; i++ )
+      if ( !yespower_kats[i].src ) nv = i;
+   if ( !yespower_kat_hash( &yespower_kats[nv], src, &local, out ) )
+   {  fail = "non-vacuity (baseline hash failed)"; goto done; }
+
+   memcpy( ref, out, 32 );        // that vector's digest on the clean input
    for ( int b = 0; b < 2; b++ )
    {
       uint8_t alt[80];
       yespower_kat_input( alt );
       alt[ b ? 70 : 10 ] ^= 0x01;
-      if ( !yespower_kat_hash( &yespower_kats[YESPOWER_NUM_KATS-1], alt,
+      if ( !yespower_kat_hash( &yespower_kats[nv], alt,
                                &local, out ) )
       {  fail = "non-vacuity (hash failed)"; goto done; }
       if ( !memcmp( out, ref, 32 ) )
@@ -161,8 +179,11 @@ bool yespower_gate_self_test( void )
               YESPOWER_KAT_PATH, fail );
       return false;
    }
+   // Not all of them are upstream's any more: the minotaurx vector is derived
+   // from a real Pulsar block, because upstream publishes none for those
+   // parameters.
    applog( LOG_NOTICE,
-           "yespower self-test PASSED (%s path, %d upstream vectors)",
+           "yespower self-test PASSED (%s path, %d vectors)",
            YESPOWER_KAT_PATH, (int)YESPOWER_NUM_KATS );
    return true;
 }
