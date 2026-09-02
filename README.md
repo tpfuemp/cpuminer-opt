@@ -169,12 +169,25 @@ Supported Algorithms
                           yescryptr16   Eli
                           yescryptr32   WAVI
                           yespower      Cryply
+                          yespoweradvc  AdventureCoin (ADVC)
+                          yespowereqpay EquityPay (EQPAY)
+                          yespowerltncg Crionic (CRNC)
+                          yespowermgpc  MagpieCoin (MGPC)
                           yespowerr16   Yenten (YTN)
+                          yespowersugar Sugarchain (SUGAR)
+                          yespowertide  Tidecoin (TDC)
+                          yespowerurx   UraniumX (URX)
                           yespower-b2b  generic yespower + blake2b
                           zr5           Ziftr
 
 Many variations of scrypt based algos can be mine by specifying their
 parameters:
+
+Some yespower variants also have a named algo, listed above. Prefer the named
+form where one exists: it carries the coin's parameters and checks them against
+a known-answer test at startup, so a wrong parameter refuses to start rather
+than mining shares the pool rejects. See docs/algorithms/yescrypt-yespower.md
+for the parameter table and where each set was sourced from.
 
 scryptn2: --algo scrypt --param-n 1048576
 
@@ -182,7 +195,7 @@ cpupower: --algo yespower --param-key "CPUpower: The number of CPU working or av
 
 power2b: --algo yespower-b2b --param-n 2048 --param-r 32 --param-key "Now I am become Death, the destroyer of worlds"
 
-sugarchain: --algo yespower --param-n 2048 -param-r 32 --param-key "Satoshi Nakamoto 31/Oct/2008 Proof-of-work is essentially one-CPU-one-vote"
+sugarchain: --algo yespowersugar
 
 yespoweriots: --algo yespower --param-n 2048 --param-key "Iots is committed to the development of IOT"
 
@@ -192,7 +205,7 @@ yespoweric: --algo yespower --param-n 2048 --param-r 32 --param-key "IsotopeC"
 
 yespowerurx: --algo yespower --param-n 2048 --param-r 32 --param-key "UraniumX"
 
-yespowerltncg: --algo yespower --param-n 2048 --param-r 32 --param-key "LTNCGYES"
+yespowerltncg: --algo yespowerltncg
 
 Errata
 ------

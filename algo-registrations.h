@@ -124,7 +124,14 @@ bool register_yescryptr8g_algo( algo_gate_t *gate );
 bool register_yescryptr16_algo( algo_gate_t *gate );
 bool register_yescryptr32_algo( algo_gate_t *gate );
 bool register_yespower_algo( algo_gate_t *gate );
+bool register_yespoweradvc_algo( algo_gate_t *gate );
+bool register_yespowereqpay_algo( algo_gate_t *gate );
+bool register_yespowerltncg_algo( algo_gate_t *gate );
+bool register_yespowermgpc_algo( algo_gate_t *gate );
 bool register_yespowerr16_algo( algo_gate_t *gate );
+bool register_yespowersugar_algo( algo_gate_t *gate );
+bool register_yespowertide_algo( algo_gate_t *gate );
+bool register_yespowerurx_algo( algo_gate_t *gate );
 bool register_yespower_b2b_algo( algo_gate_t *gate );
 bool register_zr5_algo( algo_gate_t *gate );
 

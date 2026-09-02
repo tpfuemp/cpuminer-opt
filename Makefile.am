@@ -370,6 +370,7 @@ cpuminer_SOURCES = \
   algo/x22/x25x.c \
   algo/x22/x25x-4way.c \
   algo/yespower/yespower-gate.c \
+  algo/yespower/yespower-eqpay.c \
   algo/yespower/yespower-blake2b.c \
   algo/yespower/crypto/hmac-blake2b.c \
   algo/yespower/yescrypt-r8g.c \

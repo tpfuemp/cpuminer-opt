@@ -498,7 +498,8 @@ struct stratum_job
 	unsigned char ntime[4];
 	double diff;
    bool clean;
-   // for x16rt-veil
+   /* x16rt-veil; also the 64-byte tenth notify parameter shared by phi2 and
+    * EqPay (hashStateRoot then hashUTXORoot). */
    unsigned char extra[64];
    /* Equihash Stratum: fields sent directly by pool (no coinbase building)  */
    unsigned char merkleroot[32];
@@ -755,7 +756,14 @@ enum algos {
         ALGO_YESCRYPTR16,
         ALGO_YESCRYPTR32,
         ALGO_YESPOWER,
+        ALGO_YESPOWERADVC,
+        ALGO_YESPOWEREQPAY,
+        ALGO_YESPOWERLTNCG,
+        ALGO_YESPOWERMGPC,
         ALGO_YESPOWERR16,
+        ALGO_YESPOWERSUGAR,
+        ALGO_YESPOWERTIDE,
+        ALGO_YESPOWERURX,
         ALGO_YESPOWER_B2B,
         ALGO_ZR5,
         ALGO_COUNT
@@ -876,7 +884,14 @@ static const char* const algo_names[] = {
         "yescryptr16",
         "yescryptr32",
         "yespower",
+        "yespoweradvc",
+        "yespowereqpay",
+        "yespowerltncg",
+        "yespowermgpc",
         "yespowerr16",
+        "yespowersugar",
+        "yespowertide",
+        "yespowerurx",
         "yespower-b2b",
         "zr5",
         "\0"

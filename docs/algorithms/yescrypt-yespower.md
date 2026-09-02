@@ -44,12 +44,45 @@ wrong string yields a valid-looking but rejected hash.
 | `yescryptr16` | 0.5 | 4096 | 16 | `"Client Key"` | Eli |
 | `yescryptr32` | 0.5 | 4096 | 32 | `"WaviBanana"` | WAVI |
 | `yespower`    | 1.0 | 2048¹ | 32¹ | from `--param-key` (else none) | Cryply |
+| `yespoweradvc` | 1.0 | 2048 | 32 | `"Let the quest begin"` | AdventureCoin (ADVC) |
+| `yespowereqpay`³ | 1.0 | 2048 | 32 | `"The gods had gone away, and the ritual of the religion continued senselessly, uselessly."` | EquityPay (EQPAY) |
+| `yespowerltncg` | 1.0 | 2048 | 32 | `"LTNCGYES"` | Crionic (CRNC) |
+| `yespowermgpc` | 1.0 | 2048 | 32 | `"Magpies are birds of the Corvidae family."` | MagpieCoin (MGPC) |
 | `yespowerr16` | 1.0 | 4096 | 16 | none | Yenten (YTN) |
+| `yespowersugar` | 1.0 | 2048 | 32 | `"Satoshi Nakamoto 31/Oct/2008 Proof-of-work is essentially one-CPU-one-vote"` | Sugarchain (SUGAR) |
+| `yespowertide` | 1.0 | 2048 | **8** | none | Tidecoin (TDC) |
+| `yespowerurx` | 1.0 | 2048 | 32 | `"UraniumX"` | UraniumX (URX) |
 | `power2b`     | 1.0 + b2b | 2048 | 32 | `"Now I am become Death, the destroyer of worlds"` | MicroBitcoin (MBC) |
 | `yespower-b2b`| 1.0 + b2b | required² | required² | from `--param-key` | generic |
 
 ¹ default, overridable from the command line.
 ² `yespower-b2b` requires `--param-n` and `--param-r`.
+³ **not a parameter variant** — see below.
+
+`yespowereqpay` is the one entry in this table that needs more than parameters.
+EquityPay is Qtum-derived, so its proof-of-work covers a **181-byte extended
+header**, not the usual 80: `hashStateRoot` and `hashUTXORoot` follow the nonce,
+then a null `prevoutStake` (a zero hash and `n = 0xffffffff`) and a zero length
+byte for the empty block signature. The pool supplies the two roots as a
+64-byte tenth Stratum parameter — the same slot `phi2` uses — with each 32-bit
+word byte-swapped. It therefore has its own `scanhash` and header builder in
+`algo/yespower/yespower-eqpay.c`; the yespower call itself is unchanged, just
+given 181 bytes instead of 80.
+
+`yespowertide` is the only variant at `r = 8` with version 1.0 — it inherited
+MicroBitcoin's parameters, so it is **not** interchangeable with plain `yespower`
+(`r = 32`) despite both having no personalization.
+
+`yespoweradvc` covers AdventureCoin's current parameters. The chain changed
+parameters at `nTime > 1553904000`; blocks below that used `0.5 / 4096 / 16 /
+"Client Key"`, which is exactly what this miner registers as `yescryptr16`.
+
+The named variants with fixed parameters print their tuple at startup and verify
+it against a known-answer vector before mining, so a wrong parameter refuses to
+start. Note what that does and does not cover: it proves the tuple is one of the
+known ones, not that it is the right one for the coin — the parameters themselves
+were read from each coin's daemon source, which is the evidence that they match
+consensus.
 
 `yescryptr8g` (Koto) is the odd one out: its personalization is the block header
 itself, and its length depends on whether the job is sapling (112 bytes) or not
@@ -85,6 +118,16 @@ exact parameters of specific coins (CPUpower, Sugarchain, and the various
 
 Each implementation matches the reference yescrypt/yespower output; correctness is
 confirmed by pool-accepted shares for the specific coin parameters.
+
+A startup self-test runs the whole known-answer vector table on every yespower
+registration. Fourteen of the vectors are upstream's own; the rest cover
+parameter sets upstream publishes none for, and were produced by agreement
+between this tree's two independent implementations (`yespower()` and
+`yespower_ref()`), except minotaurx's, which is anchored on a real block.
+
+That table is what catches a mis-built or mis-specialised binary: every variant
+shares one source file compiled twice (v0.5 and v1.0) across four ISA paths, and
+any one build exercises a single path.
 
 ## Possible optimizations (preview)
 

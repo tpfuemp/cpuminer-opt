@@ -188,6 +188,66 @@ bool yespower_gate_self_test( void )
    return true;
 }
 
+// Confirm the tuple a registration just selected is covered by a vector, by
+// hashing with the live `yespower_params` rather than with a vector's own
+// fields. yespower_self_test() above does the latter, so it passes identically
+// for every variant and cannot notice a registration that set N, r or pers
+// wrongly; this refuses to start instead of mining rejects.
+//
+// Only the fixed coin variants use this. The generic yespower/yescrypt
+// registrations take --param-n/-r/-key and by design have no vector.
+//
+// It proves the tuple is a known one, not the right one for the coin: moving a
+// variant onto another registered variant's tuple still passes. Only the
+// sourced parameters rule that out.
+static bool yespower_verify_registered( void )
+{
+   const yespower_params_t *p = &yespower_params;
+   const char *pers = (const char*)p->pers;
+
+   for ( size_t i = 0; i < YESPOWER_NUM_KATS; i++ )
+   {
+      const yespower_kat_t *v = &yespower_kats[i];
+
+      // Only vectors over the shared 80-byte input are comparable here.
+      if ( v->src || v->pers_is_src ) continue;
+      if ( v->version != p->version || v->N != p->N || v->r != p->r ) continue;
+      if ( ( v->pers == NULL ) != ( pers == NULL ) ) continue;
+      if ( pers && ( strlen( pers ) != p->perslen
+                     || strcmp( v->pers, pers ) ) ) continue;
+
+      struct work_restart *saved_restart = work_restart;
+      yespower_local_t local;
+      uint8_t src[80], out[32];
+      int hashed;
+
+      if ( !work_restart ) work_restart = yespower_kat_restart;
+      YESPOWER_KAT_INIT( &local );
+      yespower_kat_input( src );
+      sha256_ctx_init( &sha256_prehash_ctx );
+      sha256_update( &sha256_prehash_ctx, src, 64 );
+      hashed = YESPOWER_KAT_FN( &local, src, 80, p,
+                                (yespower_binary_t*)out, 0 ) == 1;
+      YESPOWER_KAT_FREE( &local );
+      work_restart = saved_restart;
+
+      if ( !hashed )
+      {
+         applog( LOG_ERR, "yespower: hash failed for registered parameters" );
+         return false;
+      }
+      if ( memcmp( out, v->digest, 32 ) )
+      {  yespower_kat_log( v->name, out, v->digest ); return false; }
+      return true;
+   }
+
+   applog( LOG_ERR, "yespower: registered parameters are not covered by any "
+           "KAT vector (version %d.%d, N %d, r %d, key %s)",
+           p->version / 10, p->version % 10, p->N, p->r,
+           pers ? pers : "none" );
+   return false;
+}
+
 // The blake2b variants have no published vectors, so anchor them against the
 // in-tree reference instead. yespower-blake2b-ref.c is compiled into every
 // build and shares nothing with the optimized path below the blake2b bracket,
@@ -413,6 +473,86 @@ bool register_yespowerr16_algo( algo_gate_t* gate )
   opt_target_factor = 65536.0;
   return yespower_gate_self_test();
  };
+
+// ------------------------------------------------- coin parameter variants
+//
+// No algorithm code: one yespower engine, the same gate pointers, and a
+// (version, N, r, pers) tuple read from each coin's own daemon source.
+// yespower-kat.h pins every tuple against drift and mis-built ISA paths.
+//
+// A wrong pers mines well-formed digests a pool silently rejects, so perslen
+// comes from strlen() and cannot disagree with the string.
+
+static bool register_yespower_coin( algo_gate_t *gate, yespower_version_t ver,
+                                    uint32_t N, uint32_t r, const char *pers )
+{
+  yespower_params.version = ver;
+  yespower_params.N       = N;
+  yespower_params.r       = r;
+  yespower_params.pers    = pers ? (const uint8_t*)pers : NULL;
+  yespower_params.perslen = pers ? strlen( pers ) : 0;
+  gate->optimizations     = SSE2_OPT | SHA256_OPT | NEON_OPT;
+  gate->scanhash          = (void*)&scanhash_yespower;
+  gate->miner_thread_free = (void*)&yespower_gate_thread_free;
+#if (__SSE2__) || defined(__aarch64__)
+  gate->hash              = (void*)&yespower_hash;
+#else
+  gate->hash              = (void*)&yespower_hash_ref;
+#endif
+  opt_target_factor = 65536.0;
+
+  // The self-test's PASSED line says nothing about which tuple this algo
+  // selected; these two lines are the only startup output that does.
+  applog( LOG_NOTICE, "Yespower parameters: version= %d.%d, N= %d, R= %d",
+          ver / 10, ver % 10, yespower_params.N, yespower_params.r );
+  if ( yespower_params.pers )
+     applog( LOG_NOTICE, "Key= \"%s\", length= %d",
+             (const char*)yespower_params.pers,
+             (int)yespower_params.perslen );
+  else
+     applog( LOG_NOTICE, "Key= none" );
+
+  // Specific check first: it names the registration, not just the engine.
+  return yespower_verify_registered() && yespower_gate_self_test();
+}
+
+// AdventureCoin (ADVC). The chain switched parameters at nTime 1553904000;
+// earlier blocks use v0.5 / 4096 / 16 / "Client Key", i.e. yescryptr16.
+bool register_yespoweradvc_algo( algo_gate_t* gate )
+{  return register_yespower_coin( gate, YESPOWER_1_0, 2048, 32,
+                                  "Let the quest begin" );
+}
+
+// Crionic (CRNC). Named for the key, as the pool is.
+bool register_yespowerltncg_algo( algo_gate_t* gate )
+{  return register_yespower_coin( gate, YESPOWER_1_0, 2048, 32, "LTNCGYES" );
+}
+
+// Sugarchain (SUGAR).
+bool register_yespowersugar_algo( algo_gate_t* gate )
+{  return register_yespower_coin( gate, YESPOWER_1_0, 2048, 32,
+     "Satoshi Nakamoto 31/Oct/2008 Proof-of-work is essentially one-CPU-one-vote" );
+}
+
+// Tidecoin (TDC). r = 8, inherited from MicroBitcoin's parameters, so this is
+// NOT the same as plain `yespower` -- that one is r = 32.
+bool register_yespowertide_algo( algo_gate_t* gate )
+{  return register_yespower_coin( gate, YESPOWER_1_0, 2048, 8, NULL );
+}
+
+// MagpieCoin (MGPC).
+bool register_yespowermgpc_algo( algo_gate_t* gate )
+{  return register_yespower_coin( gate, YESPOWER_1_0, 2048, 32,
+                                  "Magpies are birds of the Corvidae family." );
+}
+
+// UraniumX (URX).
+bool register_yespowerurx_algo( algo_gate_t* gate )
+{  return register_yespower_coin( gate, YESPOWER_1_0, 2048, 32, "UraniumX" );
+}
+
+// EquityPay (EQPAY) is not here: its PoW covers a 181-byte extended header,
+// so it needs its own scanhash and header builder. See yespower-eqpay.c.
 
 // Legacy Yescrypt (yespower v0.5)
 

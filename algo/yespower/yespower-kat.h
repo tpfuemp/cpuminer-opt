@@ -7,16 +7,20 @@
 /*
  * yespower / yescrypt known-answer tests.
  *
- * Vectors 1-14 are upstream's own published ones. The 15th covers minotaurx's
- * parameters, derived from a real Pulsar block because upstream publishes no
- * vector for them, so this file is no longer purely upstream's.
- * building upstream unmodified -- they are not self-generated.
+ * Vectors 1-14 are upstream's own published ones, from building upstream
+ * unmodified. The rest are ours, because upstream publishes none for those
+ * parameters: minotaurx is anchored on a real Pulsar block, and the coin
+ * variants (advc, ltncg, mgpc, sugar, tide, urx) are digests both of this
+ * tree's implementations agree on, yespower() and yespower_ref(). Agreement
+ * pins the code against drift and mis-built binaries; it does not prove a
+ * tuple matches its coin.
  *
- * Why this matters here: ~10 registered algos share ONE source file compiled
- * TWICE (`_YESPOWER_OPT_C_PASS_` 1 = v0.5, 2 = v1.0), across four ISA paths,
- * and a build exercises one ISA path. A miscompiled or mis-specialised path
- * produces a well-formed digest that a pool silently rejects. The six vectors
- * marked REGISTERED below pin the exact parameters this miner ships.
+ * Why this matters here: every registered variant shares ONE source file
+ * compiled TWICE (`_YESPOWER_OPT_C_PASS_` 1 = v0.5, 2 = v1.0), across four
+ * ISA paths, and a build exercises one ISA path. A miscompiled or
+ * mis-specialised path produces a well-formed digest that a pool silently
+ * rejects. The vectors marked REGISTERED below pin the exact parameters this
+ * miner ships.
  *
  * NOTE: vector 1 (BSTY) personalizes with the *input itself*, all 80 bytes, which
  * is why it carries `pers_is_src` rather than a string.
@@ -154,6 +158,55 @@ static const yespower_kat_t yespower_kats[] =
        0x71, 0xfa, 0x82, 0x9e, 0x79, 0xd3, 0x75, 0x3b, 0x27, 0x35, 0xfe, 0xc8,
        0xd4, 0xe7, 0x2b, 0xf5, 0xfc, 0x05, 0x00, 0x00 }, 0,
      yespower_kat_minotaurx_in, 64 },
+
+   /* Coin variants. perslen is not stored: yespower_kat_hash() takes
+    * strlen(pers), so string and length cannot disagree. */
+
+   { "yespoweradvc (1.0, 2048, 32, \"Let the quest begin\")  REGISTERED",
+     YESPOWER_1_0, 2048, 32, "Let the quest begin", 0,
+     {
+       0x11, 0x62, 0xa0, 0xbc, 0xbd, 0xfa, 0xc9, 0x9c, 0x92, 0x5e, 0x24, 0x80,
+       0x44, 0x26, 0x47, 0xe6, 0xcb, 0xfa, 0x7e, 0x2e, 0x39, 0x1e, 0x70, 0x2e,
+       0x21, 0xfd, 0xcb, 0x93, 0x10, 0x6b, 0x08, 0xeb }, 0, NULL, 0 },
+
+   { "yespowerltncg (1.0, 2048, 32, \"LTNCGYES\")  REGISTERED",
+     YESPOWER_1_0, 2048, 32, "LTNCGYES", 0,
+     {
+       0xb6, 0xc5, 0xe7, 0x07, 0xb3, 0x5d, 0x19, 0x5e, 0x44, 0x13, 0x47, 0x26,
+       0x49, 0x97, 0x5d, 0x1e, 0x34, 0x4b, 0x1f, 0x21, 0xbe, 0x73, 0xba, 0x8a,
+       0xdd, 0x48, 0xa4, 0xe4, 0x88, 0x38, 0xe4, 0xd7 }, 0, NULL, 0 },
+
+   { "yespowersugar (1.0, 2048, 32, \"Satoshi Nakamoto ...\")  REGISTERED",
+     YESPOWER_1_0, 2048, 32,
+     "Satoshi Nakamoto 31/Oct/2008 Proof-of-work is essentially one-CPU-one-vote",
+     0,
+     {
+       0x3e, 0x13, 0x2e, 0xe3, 0x3d, 0x9e, 0xb9, 0x00, 0xc1, 0x78, 0x2e, 0x4b,
+       0x67, 0xbe, 0xb9, 0x72, 0x2b, 0x36, 0xa7, 0x34, 0xab, 0x7c, 0x80, 0xf1,
+       0x6e, 0xb0, 0x05, 0xb5, 0x4e, 0xeb, 0x03, 0x4c }, 0, NULL, 0 },
+
+   /* r = 8, not 32 -- the only variant here that is not 2048/32. */
+   { "yespowertide (1.0, 2048, 8, NULL)  REGISTERED",
+     YESPOWER_1_0, 2048, 8, NULL, 0,
+     {
+       0x69, 0xe0, 0xe8, 0x95, 0xb3, 0xdf, 0x7a, 0xee, 0xb8, 0x37, 0xd7, 0x1f,
+       0xe1, 0x99, 0xe9, 0xd3, 0x4f, 0x7e, 0xc4, 0x6e, 0xcb, 0xca, 0x7a, 0x2c,
+       0x43, 0x08, 0xe5, 0x18, 0x57, 0xae, 0x9b, 0x46 }, 0, NULL, 0 },
+
+   { "yespowermgpc (1.0, 2048, 32, \"Magpies ...\")  REGISTERED",
+     YESPOWER_1_0, 2048, 32, "Magpies are birds of the Corvidae family.", 0,
+     {
+       0x35, 0xde, 0xfd, 0x7a, 0xce, 0xa1, 0x27, 0x52, 0x8a, 0x69, 0x43, 0x3b,
+       0xff, 0xb2, 0x26, 0xa0, 0x55, 0xab, 0x2a, 0x49, 0x24, 0x10, 0xff, 0x38,
+       0x0a, 0xa4, 0x71, 0x6e, 0x93, 0x4a, 0x7f, 0x8c }, 0, NULL, 0 },
+
+   { "yespowerurx (1.0, 2048, 32, \"UraniumX\")  REGISTERED",
+     YESPOWER_1_0, 2048, 32, "UraniumX", 0,
+     {
+       0xdf, 0x3c, 0xf2, 0x97, 0x78, 0x6a, 0x4e, 0xb8, 0x48, 0x74, 0xb5, 0x3d,
+       0x10, 0x34, 0xf3, 0xb4, 0xa4, 0xd2, 0x66, 0x0a, 0x96, 0xeb, 0x51, 0xba,
+       0xcd, 0x90, 0x75, 0x40, 0xa9, 0x4a, 0x4f, 0x5f }, 0, NULL, 0 },
+
 };
 
 #define YESPOWER_NUM_KATS ( sizeof(yespower_kats) / sizeof(yespower_kats[0]) )

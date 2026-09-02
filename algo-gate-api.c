@@ -413,7 +413,14 @@ case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_YESCRYPTR16:  rc = register_yescryptr16_algo   ( gate ); break;
     case ALGO_YESCRYPTR32:  rc = register_yescryptr32_algo   ( gate ); break;
     case ALGO_YESPOWER:     rc = register_yespower_algo      ( gate ); break;
+    case ALGO_YESPOWERADVC: rc = register_yespoweradvc_algo  ( gate ); break;
+    case ALGO_YESPOWEREQPAY: rc = register_yespowereqpay_algo( gate ); break;
+    case ALGO_YESPOWERLTNCG: rc = register_yespowerltncg_algo( gate ); break;
+    case ALGO_YESPOWERMGPC: rc = register_yespowermgpc_algo  ( gate ); break;
     case ALGO_YESPOWERR16:  rc = register_yespowerr16_algo   ( gate ); break;
+    case ALGO_YESPOWERSUGAR: rc = register_yespowersugar_algo( gate ); break;
+    case ALGO_YESPOWERTIDE: rc = register_yespowertide_algo  ( gate ); break;
+    case ALGO_YESPOWERURX:  rc = register_yespowerurx_algo   ( gate ); break;
     case ALGO_YESPOWER_B2B: rc = register_yespower_b2b_algo  ( gate ); break;
     case ALGO_ZR5:          rc = register_zr5_algo           ( gate ); break;
    default:

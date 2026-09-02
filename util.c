@@ -2343,7 +2343,11 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 	uchar **merkle = NULL;
 	int jsize = json_array_size(params);
    bool has_claim = ( opt_algo == ALGO_LBRY ) && ( jsize == 10 );
-   bool has_roots = ( opt_algo == ALGO_PHI2 ) && ( jsize == 10 );
+   /* A tenth parameter directly after prevhash, 64 bytes of hex. For PHI2 and
+    * for EqPay it is the pair of Qtum-style roots, hashStateRoot then
+    * hashUTXORoot, which both chains append to the block header. */
+   bool has_roots = ( opt_algo == ALGO_PHI2
+                   || opt_algo == ALGO_YESPOWEREQPAY ) && ( jsize == 10 );
    bool is_veil  = ( opt_algo == ALGO_X16RT_VEIL );
 
    job_id = json_string_value(json_array_get(params, p++));
