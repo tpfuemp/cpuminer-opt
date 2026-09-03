@@ -62,6 +62,7 @@ bool register_mike_algo( algo_gate_t *gate );
 bool register_minotaur_algo( algo_gate_t *gate );
 bool register_myriad_algo( algo_gate_t *gate );
 bool register_neoscrypt_algo( algo_gate_t *gate );
+bool register_neoscrypt_xaya_algo( algo_gate_t *gate );
 bool register_nist5_algo( algo_gate_t *gate );
 bool register_odo_algo( algo_gate_t *gate );
 bool register_pentablake_algo( algo_gate_t *gate );

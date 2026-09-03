@@ -351,6 +351,7 @@ case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_MINOTAURX:    rc = register_minotaur_algo      ( gate ); break;
     case ALGO_MYR_GR:       rc = register_myriad_algo        ( gate ); break;
     case ALGO_NEOSCRYPT:    rc = register_neoscrypt_algo     ( gate ); break;
+    case ALGO_NEOSCRYPT_XAYA: rc = register_neoscrypt_xaya_algo( gate ); break;
     case ALGO_NIST5:        rc = register_nist5_algo         ( gate ); break;
     case ALGO_ODO:          rc = register_odo_algo           ( gate ); break;
     case ALGO_PENTABLAKE:   rc = register_pentablake_algo    ( gate ); break;

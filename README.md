@@ -105,6 +105,7 @@ Supported Algorithms
                           minotaurx
                           myr-gr        Myriad-Groestl
                           neoscrypt     NeoScrypt(128, 2, 1)
+                          neoscrypt-xaya Xaya (CHI), SpaceXpanse (ROD)
                           nist5         Nist5
                           odo           DigiByte (DGB)
                           pentablake    Pentablake
