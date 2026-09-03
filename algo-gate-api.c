@@ -361,6 +361,7 @@ case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_POWER2B:      rc = register_power2b_algo       ( gate ); break;
     case ALGO_QUARK:        rc = register_quark_algo         ( gate ); break;
     case ALGO_QUBIT:        rc = register_qubit_algo         ( gate ); break;
+    case ALGO_RANDOMX:      rc = register_randomx_algo       ( gate ); break;
     case ALGO_RINHASH:      rc = register_rinhash_algo       ( gate ); break;
     case ALGO_SCRYPT:       rc = register_scrypt_algo        ( gate ); break;
     case ALGO_SHA256CSM:    rc = register_sha256csm_algo     ( gate ); break;
@@ -478,6 +479,10 @@ const char* const algo_alias_map[][2] =
   { "myriad",            "myr-gr"         },
   { "neo",               "neoscrypt"      },
   { "rin",               "rinhash"        },
+  { "rx",                "randomx"        },   /* pool-side names        */
+  { "rx/0",              "randomx"        },
+  { "monero",            "randomx"        },
+  { "xmr",               "randomx"        },
   { "x12r",              "soterg"         },
   { "soter",             "soterg"         },
   { "phi",               "phi1612"        },

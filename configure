@@ -661,6 +661,8 @@ HAVE_APPLE_FALSE
 HAVE_APPLE_TRUE
 MINGW_FALSE
 MINGW_TRUE
+HAVE_ASM_HWCAP_FALSE
+HAVE_ASM_HWCAP_TRUE
 ARCH_ARM64_FALSE
 ARCH_ARM64_TRUE
 ARCH_x86_64_FALSE
@@ -3720,6 +3722,8 @@ fi
 
 
 
+cxxflags_user_set=${CXXFLAGS+set}
+
 
 
 
@@ -6158,6 +6162,19 @@ then :
 
 fi
 
+
+       for ac_header in asm/hwcap.h
+do :
+  ac_fn_c_check_header_compile "$LINENO" "asm/hwcap.h" "ac_cv_header_asm_hwcap_h" "$ac_includes_default"
+if test "x$ac_cv_header_asm_hwcap_h" = xyes
+then :
+  printf "%s\n" "#define HAVE_ASM_HWCAP_H 1" >>confdefs.h
+ have_asm_hwcap=yes
+else $as_nop
+  have_asm_hwcap=no
+fi
+
+done
 # sys/sysctl.h requires sys/types.h on FreeBSD
 # sys/sysctl.h requires sys/param.h on OpenBSD
 ac_fn_c_check_header_compile "$LINENO" "sys/sysctl.h" "ac_cv_header_sys_sysctl_h" "#include <sys/types.h>
@@ -6520,14 +6537,14 @@ esac
 # compiles proves nothing about the CPU, and guessing wrong is a SIGILL.
 if test x$have_arm64 = xtrue; then
   arm_user_arch=no
-  case " $CFLAGS " in
+  case " $CFLAGS $CXXFLAGS " in
     *" -march="*|*" -mcpu="*) arm_user_arch=yes ;;
   esac
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking aarch64 architecture flags" >&5
 printf %s "checking aarch64 architecture flags... " >&6; }
   if test x$arm_user_arch = xyes; then
-    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: set in CFLAGS, unchanged" >&5
-printf "%s\n" "set in CFLAGS, unchanged" >&6; }
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: set in CFLAGS/CXXFLAGS, unchanged" >&5
+printf "%s\n" "set in CFLAGS/CXXFLAGS, unchanged" >&6; }
   elif test x$cross_compiling = xyes; then
     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: none, cross compiling: pass CFLAGS=-march=..." >&5
 printf "%s\n" "none, cross compiling: pass CFLAGS=-march=..." >&6; }
@@ -6577,6 +6594,52 @@ printf "%s\n" "$arm_arch" >&6; }
       { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: none, no ARM crypto extension reported: pass CFLAGS=-march=... to override" >&5
 printf "%s\n" "none, no ARM crypto extension reported: pass CFLAGS=-march=... to override" >&6; }
     fi
+  fi
+fi
+
+# Mirror the ISA-selecting flags from CFLAGS into CXXFLAGS.
+#
+# Every build script here sets CFLAGS only, as does the aarch64 block above --
+# harmless while dummy.cpp was the only C++ file. But the vendored RandomX core
+# is C++ and its hardware-AES and SIMD paths are compile-time gated on __AES__ /
+# __AVX2__ / __ARM_FEATURE_AES, so without this a `CFLAGS=-march=native` build
+# compiles the whole RandomX VM at the baseline ISA, with no warning anywhere.
+# One place to be right, and it covers a hand-rolled CFLAGS=... ./configure too.
+#
+# Skipped if CXXFLAGS already names an ISA: the user has chosen, and a silent
+# append could contradict them.
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether to mirror ISA flags from CFLAGS into CXXFLAGS" >&5
+printf %s "checking whether to mirror ISA flags from CFLAGS into CXXFLAGS... " >&6; }
+cxx_has_isa=no
+case " $CXXFLAGS " in
+  *" -march="*|*" -mcpu="*|*" -mtune="*|*" -m64"*|*" -m32"*) cxx_has_isa=yes ;;
+  *" -maes"*|*" -mavx"*|*" -msse"*|*" -mssse3"*)             cxx_has_isa=yes ;;
+esac
+if test x$cxx_has_isa = xyes; then
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no, CXXFLAGS already selects an ISA" >&5
+printf "%s\n" "no, CXXFLAGS already selects an ISA" >&6; }
+else
+  cxx_isa_flags=
+  for cxx_cf in $CFLAGS; do
+    case $cxx_cf in
+      -march=*|-mcpu=*|-mtune=*|-m32|-m64) cxx_isa_flags="$cxx_isa_flags $cxx_cf" ;;
+      -maes|-mavx*|-msse*|-mssse3|-mpclmul|-msha|-mvaes|-mbmi*|-mfma|-mpopcnt) \
+        cxx_isa_flags="$cxx_isa_flags $cxx_cf" ;;
+      -mno-*) cxx_isa_flags="$cxx_isa_flags $cxx_cf" ;;
+      -O*)
+                                if test x$cxxflags_user_set != xset; then
+          cxx_isa_flags="$cxx_isa_flags $cxx_cf"
+        fi
+        ;;
+    esac
+  done
+  if test -n "$cxx_isa_flags"; then
+    CXXFLAGS="$CXXFLAGS$cxx_isa_flags"
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes:$cxx_isa_flags" >&5
+printf "%s\n" "yes:$cxx_isa_flags" >&6; }
+  else
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no, CFLAGS selects no ISA either" >&5
+printf "%s\n" "no, CFLAGS selects no ISA either" >&6; }
   fi
 fi
 
@@ -6884,6 +6947,14 @@ else
   ARCH_ARM64_FALSE=
 fi
 
+ if test x$have_asm_hwcap = xyes; then
+  HAVE_ASM_HWCAP_TRUE=
+  HAVE_ASM_HWCAP_FALSE='#'
+else
+  HAVE_ASM_HWCAP_TRUE='#'
+  HAVE_ASM_HWCAP_FALSE=
+fi
+
  if test "x$OS" = "xWindows_NT"; then
   MINGW_TRUE=
   MINGW_FALSE='#'
@@ -7103,6 +7174,10 @@ Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${ARCH_ARM64_TRUE}" && test -z "${ARCH_ARM64_FALSE}"; then
   as_fn_error $? "conditional \"ARCH_ARM64\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${HAVE_ASM_HWCAP_TRUE}" && test -z "${HAVE_ASM_HWCAP_FALSE}"; then
+  as_fn_error $? "conditional \"HAVE_ASM_HWCAP\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${MINGW_TRUE}" && test -z "${MINGW_FALSE}"; then

@@ -49,6 +49,7 @@
 #include "algo/sha/sha256d.h"
 #include "algo/equihash/equihash.h"   /* EQH_DIFF_SCALE */
 #include "algo/verus/verus-gate.h"    /* verus_padded_solution_size */
+#include "algo/randomx/randomx-gate.h" /* Monero stratum dialect */
 
 struct header_info {
 	char		*lp_path;
@@ -2886,6 +2887,12 @@ bool stratum_handle_method(struct stratum_ctx *sctx, const char *s)
       pthread_mutex_unlock(&sctx->work_lock);
       sctx->new_job = true;
       goto out;
+	}
+	/* Monero/RandomX pushes {"method":"job","params":{...}}: a different
+	 * protocol, not a notify variant. See algo/randomx/randomx-stratum.c. */
+	if (!strcasecmp(method, "job") && opt_algo == ALGO_RANDOMX) {
+		ret = rx_stratum_job(sctx, params);
+		goto out;
 	}
 	if (!strcasecmp(method, "mining.ping")) { // cgminer 4.7.1+
 		if (opt_debug) applog(LOG_DEBUG, "Pool ping");

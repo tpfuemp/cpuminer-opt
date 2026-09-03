@@ -60,6 +60,109 @@ libcurvehash_secp256k1_a_CPPFLAGS = $(ALL_INCLUDES) \
 libcurvehash_secp256k1_a_CFLAGS = $(disable_flags) \
   -Wno-unknown-warning-option -Wno-nonnull-compare -Wno-unused-function
 
+# RandomX: the tevador BSD-3 core, vendored under algo/randomx/randomx.
+# Provenance, dropped files, re-sync procedure and build notes: VENDOR.md there.
+# Its own convenience library, for three scoping reasons:
+#   - it is C++ with flat internal includes, and brings its own argon2 and
+#     blake2b whose names would otherwise sit on every other TU's include path
+#     next to algo/argon2d's;
+#   - argon2_ssse3.c and argon2_avx2.c each need their own -m flag, and automake
+#     scopes flags per library, not per file -- hence the two satellites below;
+#   - upstream stays unedited, so its warnings are silenced per-object.
+# Deliberately NO -maes/-march: the core falls back to soft AES at runtime when
+# the ISA is absent, so inheriting each tier's own CFLAGS is what makes a tier
+# build match the CPU it targets. randomx-kat prints what was selected.
+RANDOMX_INCLUDES = $(ALL_INCLUDES) -I$(top_srcdir)/algo/randomx
+# unused-variable/-function in the vendored argon2 and per-ISA stubs. Silenced
+# per-object so the rest of the tree keeps them and upstream stays unedited.
+# -Wno-unknown-warning-option first for clang; GCC ignores it.
+RANDOMX_QUIET = -Wno-unknown-warning-option -Wno-unused-function \
+  -Wno-unused-variable
+
+noinst_LIBRARIES += librandomx.a
+
+librandomx_a_SOURCES = \
+  algo/randomx/randomx-buildinfo.cpp \
+  algo/randomx/randomx/aes_hash.cpp \
+  algo/randomx/randomx/allocator.cpp \
+  algo/randomx/randomx/blake2_generator.cpp \
+  algo/randomx/randomx/bytecode_machine.cpp \
+  algo/randomx/randomx/cpu.cpp \
+  algo/randomx/randomx/dataset.cpp \
+  algo/randomx/randomx/instruction.cpp \
+  algo/randomx/randomx/instructions_portable.cpp \
+  algo/randomx/randomx/randomx.cpp \
+  algo/randomx/randomx/soft_aes.cpp \
+  algo/randomx/randomx/superscalar.cpp \
+  algo/randomx/randomx/virtual_machine.cpp \
+  algo/randomx/randomx/vm_compiled.cpp \
+  algo/randomx/randomx/vm_compiled_light.cpp \
+  algo/randomx/randomx/vm_interpreted.cpp \
+  algo/randomx/randomx/vm_interpreted_light.cpp \
+  algo/randomx/randomx/argon2_core.c \
+  algo/randomx/randomx/argon2_ref.c \
+  algo/randomx/randomx/reciprocal.c \
+  algo/randomx/randomx/virtual_memory.c \
+  algo/randomx/randomx/blake2/blake2b.c
+
+librandomx_a_CPPFLAGS = $(RANDOMX_INCLUDES)
+librandomx_a_CFLAGS   = $(disable_flags) $(RANDOMX_QUIET)
+librandomx_a_CXXFLAGS = $(disable_flags) $(RANDOMX_QUIET)
+librandomx_a_CCASFLAGS = $(RANDOMX_INCLUDES)
+
+# librandomx.a alone is not linkable: the argon2 satellites define
+# randomx_argon2_impl_{ssse3,avx2}(), which dataset.cpp calls unconditionally
+# (returning NULL when their ISA was not compiled in). Link all three.
+RANDOMX_LIBS = librandomx.a
+
+if ARCH_x86_64
+librandomx_a_SOURCES += \
+  algo/randomx/randomx/jit_compiler_x86.cpp \
+  algo/randomx/randomx/jit_compiler_x86_static.S
+noinst_LIBRARIES += librandomx_ssse3.a librandomx_avx2.a
+RANDOMX_LIBS += librandomx_ssse3.a librandomx_avx2.a
+librandomx_ssse3_a_SOURCES = algo/randomx/randomx/argon2_ssse3.c
+librandomx_ssse3_a_CPPFLAGS = $(RANDOMX_INCLUDES)
+librandomx_ssse3_a_CFLAGS = $(disable_flags) $(RANDOMX_QUIET) -mssse3
+librandomx_avx2_a_SOURCES = algo/randomx/randomx/argon2_avx2.c
+librandomx_avx2_a_CPPFLAGS = $(RANDOMX_INCLUDES)
+librandomx_avx2_a_CFLAGS = $(disable_flags) $(RANDOMX_QUIET) -mavx2
+else
+# Off x86 both compile to a stub returning NULL, so they need no flags and no
+# separate library -- but they must still be compiled or the link fails.
+librandomx_a_SOURCES += \
+  algo/randomx/randomx/argon2_ssse3.c \
+  algo/randomx/randomx/argon2_avx2.c
+if ARCH_ARM64
+librandomx_a_SOURCES += \
+  algo/randomx/randomx/jit_compiler_a64.cpp \
+  algo/randomx/randomx/jit_compiler_a64_static.S
+if HAVE_ASM_HWCAP
+# Without this, cpu.cpp's aarch64 branch cannot see HWCAP_AES, so the
+# hardware-AES path is compiled and then never selected. randomx-kat prints the
+# compile-time and runtime answers side by side.
+librandomx_a_CPPFLAGS += -DHAVE_HWCAP
+endif
+endif
+endif
+
+# Known-answer tests for the vendored core. `make check` runs light mode;
+# `./randomx-kat --full` adds the fast-mode path, the only thing that exercises
+# randomx_init_dataset(). --bench and --sweep are measurement modes.
+#
+# randomx-kat.c holds the vectors and is also compiled into cpuminer so the algo
+# gate can run a quick subset at startup; only main() lives in -main.c, so the
+# vectors are never compiled twice with different macros.
+#
+# dummy.cpp forces the C++ linker, as in cpuminer_SOURCES.
+check_PROGRAMS = randomx-kat
+TESTS = randomx-kat
+randomx_kat_SOURCES = algo/randomx/randomx-kat-main.c \
+  algo/randomx/randomx-kat.c dummy.cpp
+randomx_kat_CPPFLAGS = $(RANDOMX_INCLUDES)
+randomx_kat_CFLAGS = $(disable_flags)
+randomx_kat_LDADD = $(RANDOMX_LIBS) $(EXTRA_LIBS) @PTHREAD_LIBS@
+
 cpuminer_SOURCES = \
   dummy.cpp \
   cpu-miner.c \
@@ -74,6 +177,10 @@ cpuminer_SOURCES = \
   algo-gate-api.c\
   malloc-huge.c \
   simd-utils/simd-constants.c \
+  algo/randomx/randomx-gate.c \
+  algo/randomx/randomx-stratum.c \
+  algo/randomx/randomx-vm.c \
+  algo/randomx/randomx-kat.c \
   algo/argon2d/argon2d-gate.c \
   algo/argon2d/blake2/blake2b.c \
   algo/argon2d/argon2d/argon2.c \
@@ -390,7 +497,7 @@ else
 endif
 
 cpuminer_LDFLAGS = @LDFLAGS@
-cpuminer_LDADD	= libcurvehash_secp256k1.a $(EXTRA_LIBS) @LIBCURL@ -ljansson @PTHREAD_LIBS@ @WS2_LIBS@ -lgmp build-stamp.$(OBJEXT)
+cpuminer_LDADD	= libcurvehash_secp256k1.a $(RANDOMX_LIBS) $(EXTRA_LIBS) @LIBCURL@ -ljansson @PTHREAD_LIBS@ @WS2_LIBS@ -lgmp build-stamp.$(OBJEXT)
 
 # Carries the date for the "SW built on" banner. Depends on the objects, so it
 # is regenerated exactly when a relink is due: `make` with nothing to do stays a
@@ -400,7 +507,7 @@ cpuminer_LDADD	= libcurvehash_secp256k1.a $(EXTRA_LIBS) @LIBCURL@ -ljansson @PTH
 EXTRA_cpuminer_DEPENDENCIES = build-stamp.$(OBJEXT)
 CLEANFILES = build-stamp.c build-stamp.$(OBJEXT)
 
-build-stamp.c: $(cpuminer_OBJECTS) libcurvehash_secp256k1.a
+build-stamp.c: $(cpuminer_OBJECTS) libcurvehash_secp256k1.a $(RANDOMX_LIBS)
 	$(AM_V_GEN)printf 'const char build_stamp_date[] = "%s";\n' \
 	  "`date '+%b %d %Y %H:%M:%S'`" > $@
 

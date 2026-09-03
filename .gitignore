@@ -51,3 +51,11 @@ compat/curl-for-windows/
 
 # generated per link, carries the SW built on date (see Makefile.am)
 build-stamp.c
+
+# `make check` artefacts: the KAT binary plus automake's test harness output.
+# Listed by name rather than as *.log/*.trs so nothing else gets hidden.
+randomx-kat
+test-driver
+test-suite.log
+randomx-kat.log
+randomx-kat.trs

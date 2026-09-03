@@ -210,6 +210,7 @@ int workspace_thread_fit( size_t ws, int want, uint64_t *avail_out )
 #include "miner.h"
 #include "algo-gate-api.h"
 #include "algo/sha/sha256-hash.h"
+#include "algo/randomx/randomx-gate.h"   /* Monero stratum dialect */
 #include "api_model.h"   // api_history_add(), called when a scan returns
 #include "api_control.h" // api_ctl_thread_should_run(), the parking protocol
 #if defined(__GLIBC__)
@@ -2213,7 +2214,12 @@ bool submit_solution( struct work *work, const void *hash,
     * normal algos (no change) and EQH_DIFF_SCALE for equihash, matching the
     * scaling applied to net_diff and the displayed targetdiff. Without this
     * equihash shares were reported ~16.7M x too small (internal scale).     */
-   work->sharediff = hash_to_diff( hash ) * opt_target_factor;
+   /* Monero share difficulty is 0xFFFF..FF / (last 8 bytes of the hash, little
+    * endian). hash_to_diff uses the bitcoin difficulty-1 base and reads the
+    * hash big endian, so it would report a different scale entirely;
+    * scanhash_randomx has already computed the right value. */
+   if ( !work->rx_work )
+      work->sharediff = hash_to_diff( hash ) * opt_target_factor;
    if ( likely( submit_work( thr, work ) ) )
    {
      update_submit_stats( work, hash, thr->id );
@@ -2387,6 +2393,55 @@ static void stratum_gen_work( struct stratum_ctx *sctx, struct work *g_work )
                            / ( opt_target_factor * opt_diff_factor );
 
    g_work->odokey = sctx->job.odokey;   // Odocrypt epoch key (0 if not sent)
+
+   g_work->rx_work = sctx->job.rx_job;
+   if ( g_work->rx_work )
+   {
+      /* RandomX: the pool sends a finished hashing blob and an exact 64-bit
+       * target, so none of the coinbase/merkle/extranonce path applies. */
+      rx_stratum_gen_work( sctx, g_work );
+      g_work_time = time(NULL);
+      restart_threads();
+      pthread_rwlock_unlock( &g_work_lock );
+
+      pthread_mutex_lock( &stats_lock );
+      double rxhr = 0.;
+      for ( int i = 0; i < opt_n_threads; i++ )
+         rxhr += thr_hashrates[i];
+      global_hashrate = rxhr;
+      pthread_mutex_unlock( &stats_lock );
+
+      char rdb[24];
+      if ( stratum_diff != sctx->job.diff )
+         applog( LOG_BLUE, "New Stratum Diff %s, Block %d, Job %s",
+                 format_diff( rdb, sizeof rdb, sctx->job.diff ),
+                 sctx->block_height, g_work->job_id );
+      else if ( last_block_height != sctx->block_height )
+         applog( LOG_BLUE, "New Block %d, Job %s", sctx->block_height,
+                 g_work->job_id );
+      else if ( opt_debug )
+         applog( LOG_INFO, "RandomX work: Block %d, Job %s, target %016llx",
+                 sctx->block_height, g_work->job_id ? g_work->job_id : "(null)",
+                 (unsigned long long)g_work->rx_target );
+
+      /* Same bookkeeping as the tail of the bitcoin path below: the periodic
+       * report derives its share hashrate from last_targetdiff, so skipping
+       * these leaves that column reading zero. */
+      if ( ( stratum_diff != sctx->job.diff )
+        || ( last_block_height != sctx->block_height ) )
+      {
+         if ( unlikely( !session_first_block ) )
+            session_first_block = sctx->block_height;
+         last_block_height = sctx->block_height;
+         stratum_diff      = sctx->job.diff;
+         last_targetdiff   = g_work->targetdiff;
+         if ( lowest_share < last_targetdiff * opt_target_factor )
+            lowest_share = 9e99;
+      }
+
+      pthread_mutex_unlock( &sctx->work_lock );
+      return;
+   }
 
    g_work->veil_sha256dv = sctx->job.veil_sha256dv;
    if ( g_work->veil_sha256dv )
@@ -3115,6 +3170,21 @@ static bool stratum_handle_response( char *buf )
    res_val = json_object_get( val, "result" );
    if ( !res_val ) { /* now what? */ }
 
+   if ( opt_algo == ALGO_RANDOMX )
+   {
+      /* Monero answers a submit with result:{"status":"OK"} and
+       * error:{"code":..,"message":..}, which neither json_is_true(result) nor
+       * json_array_get(error,1) below can read. */
+      bool accepted = false;
+      const char *reason = NULL;
+      if ( rx_stratum_parse_response( val, &accepted, &reason ) )
+      {
+         share_result( accepted, NULL, reason );
+         ret = true;
+      }
+      goto out;
+   }
+
    id_val = json_object_get( val, "id" );
 	if ( !id_val || json_is_null(id_val) )
 		goto out;
@@ -3241,9 +3311,15 @@ static void *stratum_thread(void *userdata )
          pthread_rwlock_wrlock( &g_work_lock );
          g_work_time = 0;
          pthread_rwlock_unlock( &g_work_lock );
-         if ( !stratum_connect( &stratum, stratum.url )
-              || !stratum_subscribe( &stratum )
-              || !stratum_authorize( &stratum, rpc_user, rpc_pass ) )
+         /* RandomX speaks the Monero stratum: a single "login" carrying the
+          * first job, instead of subscribe + authorize. */
+         bool connected = stratum_connect( &stratum, stratum.url );
+         if ( connected )
+            connected = ( opt_algo == ALGO_RANDOMX )
+                      ? rx_stratum_login( &stratum, rpc_user, rpc_pass )
+                      : (    stratum_subscribe( &stratum )
+                          && stratum_authorize( &stratum, rpc_user, rpc_pass ) );
+         if ( !connected )
          {
             stratum_disconnect( &stratum );
             if (opt_retries >= 0 && ++failures > opt_retries)
@@ -3263,8 +3339,19 @@ static void *stratum_thread(void *userdata )
             applog(LOG_BLUE,"Stratum connection established" );
             if ( stratum.new_job )   // prime first job
             {
-               stratum_gen_work( &stratum, &g_work );
-               stratum_down = false;   // only after g_work holds the new job
+               /* RandomX: the dataset must match the job's seed_hash before
+                * any thread hashes. Nothing is running yet at this point. */
+               if ( opt_algo == ALGO_RANDOMX
+                    && !rx_stratum_prepare_seed( &stratum ) )
+               {
+                  applog( LOG_ERR, "RandomX: dataset init failed" );
+                  stratum_need_reset = true;
+               }
+               else
+               {
+                  stratum_gen_work( &stratum, &g_work );
+                  stratum_down = false;   // only after g_work holds the new job
+               }
             }
          }
       }
@@ -3342,8 +3429,25 @@ static void *stratum_thread(void *userdata )
 
          if ( stratum.new_job && !stratum_need_reset )
          {
-            stratum_gen_work( &stratum, &g_work );
-            stratum_down = false;
+            /* RandomX: a seed_hash change rebuilds the dataset under its write
+             * lock. Miners hold the read lock across a scanhash call and then
+             * want g_work_lock, so the rebuild must run here -- after
+             * restart_threads() and before stratum_gen_work takes g_work_lock.
+             * Inside stratum_gen_work it deadlocks. */
+            if ( opt_algo == ALGO_RANDOMX )
+            {
+               restart_threads();
+               if ( !rx_stratum_prepare_seed( &stratum ) )
+               {
+                  applog( LOG_ERR, "RandomX: dataset rebuild failed" );
+                  stratum_need_reset = true;
+               }
+            }
+            if ( !stratum_need_reset )
+            {
+               stratum_gen_work( &stratum, &g_work );
+               stratum_down = false;
+            }
          }
 
       } // stratum_need_reset

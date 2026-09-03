@@ -11,6 +11,11 @@ AM_INIT_AUTOMAKE([foreign subdir-objects])
 dnl Make sure anyone changing configure.ac/Makefile.am has a clue
 AM_MAINTAINER_MODE
 
+dnl Whether CXXFLAGS came from the environment. Must be asked BEFORE
+dnl AC_PROG_CXX, which substitutes its own "-g -O2" and makes the question
+dnl unanswerable afterwards. Used by the ISA mirroring block below.
+cxxflags_user_set=${CXXFLAGS+set}
+
 dnl Checks for programs
 AC_PROG_CC_C99
 AC_PROG_GCC_TRADITIONAL
@@ -22,6 +27,13 @@ AC_PROG_CXX
 dnl Checks for header files
 AC_HEADER_STDC
 AC_CHECK_HEADERS([sys/endian.h sys/param.h syslog.h])
+
+dnl algo/randomx/randomx/cpu.cpp gates its aarch64 AES detection on
+dnl #if defined(HWCAP_AES), which only exists once <asm/hwcap.h> is included,
+dnl and that include sits behind -DHAVE_HWCAP. Upstream's CMake sets it from
+dnl the same probe. Miss it and the aarch64 build compiles the hardware-AES
+dnl path, never selects it, and mines on soft AES.
+AC_CHECK_HEADERS([asm/hwcap.h], [have_asm_hwcap=yes], [have_asm_hwcap=no])
 # sys/sysctl.h requires sys/types.h on FreeBSD
 # sys/sysctl.h requires sys/param.h on OpenBSD
 AC_CHECK_HEADERS([sys/sysctl.h], [], [],
@@ -61,12 +73,12 @@ esac
 # compiles proves nothing about the CPU, and guessing wrong is a SIGILL.
 if test x$have_arm64 = xtrue; then
   arm_user_arch=no
-  case " $CFLAGS " in
+  case " $CFLAGS $CXXFLAGS " in
     *" -march="*|*" -mcpu="*) arm_user_arch=yes ;;
   esac
   AC_MSG_CHECKING([aarch64 architecture flags])
   if test x$arm_user_arch = xyes; then
-    AC_MSG_RESULT([set in CFLAGS, unchanged])
+    AC_MSG_RESULT([set in CFLAGS/CXXFLAGS, unchanged])
   elif test x$cross_compiling = xyes; then
     AC_MSG_RESULT([none, cross compiling: pass CFLAGS=-march=...])
   else
@@ -99,6 +111,51 @@ if test x$have_arm64 = xtrue; then
     else
       AC_MSG_RESULT([none, no ARM crypto extension reported: pass CFLAGS=-march=... to override])
     fi
+  fi
+fi
+
+# Mirror the ISA-selecting flags from CFLAGS into CXXFLAGS.
+#
+# Every build script here sets CFLAGS only, as does the aarch64 block above --
+# harmless while dummy.cpp was the only C++ file. But the vendored RandomX core
+# is C++ and its hardware-AES and SIMD paths are compile-time gated on __AES__ /
+# __AVX2__ / __ARM_FEATURE_AES, so without this a `CFLAGS=-march=native` build
+# compiles the whole RandomX VM at the baseline ISA, with no warning anywhere.
+# One place to be right, and it covers a hand-rolled CFLAGS=... ./configure too.
+#
+# Skipped if CXXFLAGS already names an ISA: the user has chosen, and a silent
+# append could contradict them.
+AC_MSG_CHECKING([whether to mirror ISA flags from CFLAGS into CXXFLAGS])
+cxx_has_isa=no
+case " $CXXFLAGS " in
+  *" -march="*|*" -mcpu="*|*" -mtune="*|*" -m64"*|*" -m32"*) cxx_has_isa=yes ;;
+  *" -maes"*|*" -mavx"*|*" -msse"*|*" -mssse3"*)             cxx_has_isa=yes ;;
+esac
+if test x$cxx_has_isa = xyes; then
+  AC_MSG_RESULT([no, CXXFLAGS already selects an ISA])
+else
+  cxx_isa_flags=
+  for cxx_cf in $CFLAGS; do
+    case $cxx_cf in
+      -march=*|-mcpu=*|-mtune=*|-m32|-m64) cxx_isa_flags="$cxx_isa_flags $cxx_cf" ;;
+      -maes|-mavx*|-msse*|-mssse3|-mpclmul|-msha|-mvaes|-mbmi*|-mfma|-mpopcnt) \
+        cxx_isa_flags="$cxx_isa_flags $cxx_cf" ;;
+      -mno-*) cxx_isa_flags="$cxx_isa_flags $cxx_cf" ;;
+      -O*)
+        dnl Only when we own CXXFLAGS outright: AC_PROG_CXX defaults to
+        dnl "-g -O2", so a -O3 tree would otherwise build the hot loop one
+        dnl level down. A later -O wins, so appending is enough.
+        if test x$cxxflags_user_set != xset; then
+          cxx_isa_flags="$cxx_isa_flags $cxx_cf"
+        fi
+        ;;
+    esac
+  done
+  if test -n "$cxx_isa_flags"; then
+    CXXFLAGS="$CXXFLAGS$cxx_isa_flags"
+    AC_MSG_RESULT([yes:$cxx_isa_flags])
+  else
+    AC_MSG_RESULT([no, CFLAGS selects no ISA either])
   fi
 fi
 
@@ -145,6 +202,7 @@ AM_CONDITIONAL([HAVE_WINDOWS], [test x$have_win32 = xtrue])
 AM_CONDITIONAL([USE_ASM], [test x$enable_assembly != xno])
 AM_CONDITIONAL([ARCH_x86_64], [test x$have_x86_64 = xtrue])
 AM_CONDITIONAL([ARCH_ARM64], [test x$have_arm64 = xtrue])
+AM_CONDITIONAL([HAVE_ASM_HWCAP], [test x$have_asm_hwcap = xyes])
 AM_CONDITIONAL([MINGW], [test "x$OS" = "xWindows_NT"])
 AM_CONDITIONAL([HAVE_APPLE], [test x$have_apple = xtrue])
 

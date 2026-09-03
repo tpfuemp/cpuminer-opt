@@ -480,6 +480,16 @@ struct work
    // Odocrypt: pool-supplied epoch key ("odokey" notify field). 0 = derive
    // from nTime (nTime - nTime % shapechange).
    uint32_t      odokey;
+   /* RandomX / Monero stratum: data[] holds the pool's hashing blob verbatim,
+    * not an 80-byte bitcoin header, so ntime_index / nbits_index / the merkle
+    * machinery do not apply. The nonce is 4 LE bytes at blob offset 39.
+    * rx_target is the pool's 64-bit target, compared against the last 8 bytes
+    * of the hash; target[8] is filled only for the shared reporting code. */
+   bool          rx_work;
+   size_t        rx_blob_len;
+   uint64_t      rx_target;
+   unsigned char rx_seed_hash[32];
+   unsigned char rx_result[32];   /* the winning hash, submitted verbatim */
 } __attribute__ ((aligned (WORK_ALIGNMENT)));
 
 struct stratum_job
@@ -534,6 +544,18 @@ struct stratum_job
    // Odocrypt epoch key from the "odokey" notify field (0 if absent).
    uint32_t      odokey;
 
+   /* RandomX / Monero stratum "job" notification, and the job embedded in the
+    * "login" result. No coinbase, merkle or extranonce -- see struct work.
+    * next_seed_hash is the next epoch's key, sent ahead of the boundary and
+    * empty most of the time; the pre-warm signal for a background rebuild. */
+   bool          rx_job;
+   unsigned char rx_blob[128];
+   size_t        rx_blob_len;
+   uint64_t      rx_target;
+   unsigned char rx_seed_hash[32];
+   unsigned char rx_next_seed_hash[32];
+   bool          rx_has_next_seed;
+
 } __attribute__ ((aligned (64)));
 
 struct stratum_ctx {
@@ -559,7 +581,11 @@ struct stratum_ctx {
 	pthread_mutex_t work_lock;
 
    int block_height;
-   bool new_job;  
+   bool new_job;
+
+   /* RandomX: session id from the "login" result; every "submit" carries it.
+    * Note some pools also put an unrelated "id" inside the job object. */
+   char *rx_rpc_id;
 } __attribute__ ((aligned (64)));
 
 bool stratum_socket_full(struct stratum_ctx *sctx, int timeout);
@@ -704,6 +730,7 @@ enum algos {
         ALGO_POWER2B,
         ALGO_QUARK,
         ALGO_QUBIT,
+        ALGO_RANDOMX,
         ALGO_RINHASH,
         ALGO_SCRYPT,
         ALGO_SHA256CSM,
@@ -833,6 +860,7 @@ static const char* const algo_names[] = {
         "power2b",
         "quark",
         "qubit",
+        "randomx",
         "rinhash",
         "scrypt",
         "sha256csm",
