@@ -2890,7 +2890,7 @@ bool stratum_handle_method(struct stratum_ctx *sctx, const char *s)
 	}
 	/* Monero/RandomX pushes {"method":"job","params":{...}}: a different
 	 * protocol, not a notify variant. See algo/randomx/randomx-stratum.c. */
-	if (!strcasecmp(method, "job") && opt_algo == ALGO_RANDOMX) {
+	if (!strcasecmp(method, "job") && rx_algo_is_randomx(opt_algo)) {
 		ret = rx_stratum_job(sctx, params);
 		goto out;
 	}

@@ -362,6 +362,10 @@ case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_QUARK:        rc = register_quark_algo         ( gate ); break;
     case ALGO_QUBIT:        rc = register_qubit_algo         ( gate ); break;
     case ALGO_RANDOMX:      rc = register_randomx_algo       ( gate ); break;
+    case ALGO_RANDOMX_SFX:  rc = register_randomx_algo       ( gate ); break;
+    case ALGO_RANDOMX_WOW:  rc = register_randomx_algo       ( gate ); break;
+    case ALGO_RANDOMX_ARQ:  rc = register_randomx_algo       ( gate ); break;
+    case ALGO_RANDOMX_GRAFT: rc = register_randomx_algo      ( gate ); break;
     case ALGO_RINHASH:      rc = register_rinhash_algo       ( gate ); break;
     case ALGO_SCRYPT:       rc = register_scrypt_algo        ( gate ); break;
     case ALGO_SHA256CSM:    rc = register_sha256csm_algo     ( gate ); break;
@@ -459,17 +463,12 @@ const char* const algo_alias_map[][2] =
 //   alias                proper
   { "bcd",               "x13bcd"         },
   { "bitcore",           "timetravel10"   },
-  { "bitweb",            "argon2id1024"   },
-  { "bitzeny",           "yescryptr8"     },
   { "blake256r8",        "blakecoin"      },
   { "blake256r8vnl",     "vanilla"        },
   { "blake256r14",       "blake"          },
   { "curve",             "curvehash"      },
   { "diamond",           "dmd-gr"         },
-  { "espers",            "hmq1725"        },
   { "flax",              "c11"            },
-  { "gale",              "sha256csm"      },   /* Galleoncoin             */
-  { "galleon",           "sha256csm"      },
   { "hsr",               "x13sm3"         },
   { "jackpot",           "jha"            },
   { "lyra2",             "lyra2re"        },
@@ -483,24 +482,15 @@ const char* const algo_alias_map[][2] =
   { "rx/0",              "randomx"        },
   { "monero",            "randomx"        },
   { "xmr",               "randomx"        },
-  { "x12r",              "soterg"         },
-  { "soter",             "soterg"         },
+  { "rx/sfx",            "randomx-sfx"    },   /* pool-side name         */
+  { "rx/wow",            "randomx-wow"    },
+  { "rx/arq",            "randomx-arq"    },
+  { "rx/graft",          "randomx-graft"  },
   { "phi",               "phi1612"        },
   { "scryptn2",          "scrypt:1048576" },
   { "sha3-256t",         "sha3t"          },   /* pool-side name          */
   { "sib",               "x11gost"        },
-  /* Equihash coin aliases */
-  { "btg",               "equihash144"    },   /* Bitcoin Gold            */
-  { "bitcoingold",       "equihash144"    },
-  { "flux",              "equihash125"    },   /* Flux / ZelCash          */
-  { "zelcash",           "equihash125"    },
-  { "zel",               "equihash125"    },
-  { "horizen",           "equihash"       },   /* Horizen (ZEN) = 200/9  */
-  { "komodo",            "equihash"       },   /* Komodo = 200/9          */
-  { "zcash",             "equihash"       },   /* ZCash = 200/9           */
   { "odocrypt",          "odo"            },
-  { "zec",               "equihash"       },
-  { "zen",               "equihash"       },
   { "timetravel8",       "timetravel"     },
   { "veil",              "x16rt-veil"     },
   { "x16r-hex",          "hex"            },

@@ -48,6 +48,41 @@ uint64_t rx_current_epoch( void );
 void rx_force_reseed_for_test( void );
 bool rx_is_full_mode( void );
 
+/* --- randomx-variant.c : which RandomX variant this run mines ----------- */
+
+/* Only salt-only variants belong here; anything touching a VM or JIT constant
+ * needs its own compiled core. See randomx-variant.c. */
+typedef struct
+{
+   int                  algo;       /* ALGO_RANDOMX, ALGO_RANDOMX_SFX, ... */
+   const char          *pool_algo;  /* the pool's "algo" string, e.g. "rx/sfx" */
+   const unsigned char *salt;       /* NULL = the core's compile-time default */
+   unsigned int         salt_len;
+   /* Startup check for this variant. A real published or accepted-share
+    * vector where one exists; NULL falls back to the generic
+    * rx_kat_variant_differs() differential, which is all that is possible
+    * before a variant has ever been accepted by a pool. */
+   bool               (*selftest)( void );
+   /* Which compiled core hashes this variant. Tier-1 variants share the stock
+    * core and differ only by the runtime salt above; tier-2 variants need
+    * their own, because they move constants the core bakes into constexprs
+    * and into an immediate in hand-written assembly. NULL = stock. */
+   const struct rx_core_s *core;
+} rx_variant_t;
+
+/* Set membership, so the several `opt_algo == ALGO_RANDOMX` tests in the
+ * shared code do not have to grow a term per variant -- each one gates
+ * protocol dialect or connection behaviour, and missing one silently speaks
+ * the wrong dialect. */
+bool rx_algo_is_randomx( int algo );
+
+const rx_variant_t *rx_variant( void );
+const char *rx_variant_pool_algo( void );
+
+/* Applies the variant's salt to the core. Must be called before the first
+ * cache init and never again. */
+bool rx_variant_select( int algo );
+
 /* --- randomx-stratum.c : the Monero stratum dialect --------------------- */
 
 /* Replaces subscribe+authorize. Sends "login", parses the session id and the
@@ -85,6 +120,26 @@ bool register_randomx_algo( algo_gate_t *gate );
 /* Quick startup self-test: argon2 cache fill + one interpreter and one JIT
  * vector. A subset of what `make check` runs; see randomx-kat.c for why. */
 bool rx_kat_selftest( void );
+
+/* Fallback check for a variant with no vector yet: the selected variant must
+ * not hash identically to rx/0. Compares the two configurations against each
+ * other, so it needs no vectors and covers both tiers. Lives in
+ * randomx-variant.c because it must go through the SELECTED core -- the KAT
+ * deliberately talks to the stock core only. */
+bool rx_variant_differs_from_rx0( void );
+
+/* rx/graft: three vectors reconstructed from shares a live Graft pool
+ * accepted. Lives in randomx-variant.c, not the KAT, because a tier-2
+ * variant must be hashed by its OWN core. */
+bool rx_variant_graft_vectors( void );
+
+/* rx/arq: two vectors from shares a live ArQmA pool accepted. */
+bool rx_variant_arq_vectors( void );
+
+/* rx/sfx: a real vector, reconstructed from a share a live Safex pool
+ * accepted. Sets and restores the salt itself, so it is valid to call with
+ * either the default or the variant salt in force. */
+bool rx_kat_sfx_vector( void );
 int  rx_kat_full( int full );
 
 /* Measurement modes, driven by randomx-kat-main.c. cpuminer itself never calls

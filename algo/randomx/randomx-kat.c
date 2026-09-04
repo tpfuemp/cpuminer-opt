@@ -280,7 +280,7 @@ static void run_batch(const char *label, randomx_flags vmflags,
 static void run_commitment(randomx_cache *cache)
 {
 	/* rx/2 submits a commitment, not the raw hash. Not needed for rx/0, but
-	 * it is free to pin now and the plan keeps the v2 path alive. */
+	 * free to pin now and it keeps the v2 path covered. */
 	uint8_t hash[RANDOMX_HASH_SIZE], com[RANDOMX_HASH_SIZE];
 	randomx_vm *vm;
 
@@ -296,6 +296,95 @@ static void run_commitment(randomx_cache *cache)
 	check_hash("commitment (v2, key 000, \"This is a test\")", com,
 	           "133be717399046b03ae82ce8ddd9d1ee4d3ea7fca03a50dec09b6848cbb98e18");
 	randomx_destroy_vm(vm);
+}
+
+/* ------------------------------------------------- rx/sfx real-share vector */
+
+/* Reconstructed from a share a live Safex pool accepted. A Monero-dialect
+ * submit carries the job blob, the nonce and the resulting digest, so an
+ * accepted share is a complete vector: cache key is the job's seed_hash,
+ * input is the blob with that nonce written at byte 39, expected output is
+ * the digest the pool credited.
+ *
+ * Upstream publishes vectors for rx/0 and v2 only, so this is the only ground
+ * truth that exists for a variant. rx/sfx is tier 1 and therefore runs on the
+ * stock core, which is why its vector can live here; a tier-2 variant must be
+ * hashed by its own core and its vectors live in randomx-variant.c.
+ */
+static const char SFX_SEED[] =
+	"906f3490027d8cec7561c5683a6ea0ff2972661e7b5babcb3648a1ec49c0a62a";
+static const char SFX_BLOB[] =
+	"0707e289ead40678d3c7ca25309983e9b193477151797095a160130bcec824fc2"
+	"0513364a94038e40300e0d84d0b0cca950a183398da4fa7526b5088eaa96c58f2"
+	"5b19fadfe2b239d5247101";
+static const char SFX_WANT[] =
+	"b7c2975ebf2238b6c29737c82d0d4ef0da0d64e75a7b7903da2d931474180000";
+
+/* Set in randomx/dataset.cpp. */
+extern const unsigned char *randomx_argon_salt;
+extern unsigned int         randomx_argon_salt_len;
+
+bool rx_kat_sfx_vector(void)
+{
+	static const unsigned char salt[] = "RandomSFX\x01";
+	const unsigned char *saved_salt = randomx_argon_salt;
+	unsigned int         saved_len  = randomx_argon_salt_len;
+	randomx_flags rt, cacheflags;
+	randomx_cache *cache;
+	randomx_vm *vm;
+	uint8_t seed[32], blob[76], hash[RANDOMX_HASH_SIZE];
+	int before = failures;
+
+	/* Guard the vector literals themselves. SFX_BLOB is written as three
+	 * concatenated string pieces, so a miscount there would silently shift
+	 * the input; this file's local hex2bin() returns void and cannot report
+	 * it. Note that helper takes (hex, out, len) -- the reverse of miner.h's
+	 * hex2bin(), which is not linked into the standalone KAT binary. */
+	if (strlen(SFX_SEED) != 64 || strlen(SFX_BLOB) != 152 ||
+	    strlen(SFX_WANT) != 64) {
+		printf("  FAIL  rx/sfx vector: literal is the wrong length "
+		       "(seed %zu/64, blob %zu/152, want %zu/64)\n",
+		       strlen(SFX_SEED), strlen(SFX_BLOB), strlen(SFX_WANT));
+		failures++; ran++;
+		return false;
+	}
+	hex2bin(SFX_SEED, seed, 32);
+	hex2bin(SFX_BLOB, blob, 76);
+
+	/* Self-contained: works whether or not the caller already selected the
+	 * variant, and leaves the salt as it found it. */
+	randomx_argon_salt     = salt;
+	randomx_argon_salt_len = (unsigned)(sizeof salt - 1);
+
+	rt = randomx_get_flags();
+	cacheflags = rt & (RANDOMX_FLAG_JIT | RANDOMX_FLAG_ARGON2);
+	cache = randomx_alloc_cache(cacheflags);
+	if (!cache) {
+		printf("  SKIP  rx/sfx vector: cache allocation failed\n");
+		skipped++;
+		goto restore;
+	}
+	randomx_init_cache(cache, seed, 32);
+
+	/* Light mode: the pool credited this digest from a full-dataset miner, so
+	 * matching it in light mode also proves the two modes agree here. */
+	vm = randomx_create_vm(rt & ~(RANDOMX_FLAG_FULL_MEM | RANDOMX_FLAG_V2),
+	                       cache, NULL);
+	if (!vm) {
+		printf("  SKIP  rx/sfx vector: randomx_create_vm returned NULL\n");
+		skipped++;
+	} else {
+		randomx_calculate_hash(vm, blob, sizeof blob, hash);
+		check_hash("rx/sfx accepted-share vector (Safex, real block)",
+		           hash, SFX_WANT);
+		randomx_destroy_vm(vm);
+	}
+	randomx_release_cache(cache);
+
+restore:
+	randomx_argon_salt     = saved_salt;
+	randomx_argon_salt_len = saved_len;
+	return failures == before;
 }
 
 /* Nonce-sequence differential: one-shot vs batched over a run of nonces, in a
@@ -488,11 +577,16 @@ int rx_kat_full(int full)
 	printf("\ncommitment:\n");
 	run_commitment(cache);
 
+	/* Variant coverage. Self-contained (sets and restores the salt), so it is
+	 * safe here in the middle of the rx/0 run. */
+	printf("\nvariants:\n");
+	rx_kat_sfx_vector();
+
 	if (full) {
 		randomx_dataset *ds;
 		unsigned long count;
 
-		printf("\nfast mode (full 2336 MiB dataset):\n");
+		printf("\nfast mode (full 2080 MiB dataset):\n");
 		ds = randomx_alloc_dataset(RANDOMX_FLAG_DEFAULT);
 		if (!ds) {
 			printf("  SKIP  dataset alloc failed (need ~2.4 GB free)\n");
@@ -876,4 +970,49 @@ bool rx_kat_selftest(void)
 	randomx_release_cache(cache);
 
 	return (failures + local_fail) == 0 && ran > 0;
+}
+
+/* Proves the selected variant is not silently still hashing as rx/0.
+ *
+ * Hashes rx/0's own key and input under whatever argon salt is currently in
+ * force and requires the digest to DIFFER from rx/0's published one. That is
+ * a weak check in the sense that it cannot confirm the digest is *correct* --
+ * no variant has a published vector -- but it is the strongest thing
+ * available offline, and it catches the failure that matters: a variant whose
+ * salt never reached the core. Correctness itself is closed by the pool.
+ */
+bool rx_kat_variant_differs(void)
+{
+	randomx_flags rt, cacheflags;
+	randomx_cache *cache;
+	randomx_vm *vm;
+	uint8_t hash[RANDOMX_HASH_SIZE];
+	bool differs;
+
+	rt = randomx_get_flags();
+	cacheflags = rt & (RANDOMX_FLAG_JIT | RANDOMX_FLAG_ARGON2);
+	cache = randomx_alloc_cache(cacheflags);
+	if (!cache) {
+		printf("RandomX variant check: cache allocation failed\n");
+		return false;
+	}
+
+	randomx_init_cache(cache, KEY0, strlen(KEY0));
+
+	vm = randomx_create_vm(RANDOMX_FLAG_DEFAULT, cache, NULL);
+	if (!vm) {
+		printf("RandomX variant check: could not create a VM\n");
+		randomx_release_cache(cache);
+		return false;
+	}
+
+	randomx_calculate_hash(vm, IN_A, strlen(IN_A), hash);
+	differs = memcmp(hash, vecs[0].want_v1, RANDOMX_HASH_SIZE) != 0;
+
+	randomx_destroy_vm(vm);
+	randomx_release_cache(cache);
+
+	printf("  %s  variant salt changes the digest vs rx/0\n",
+	       differs ? "PASS" : "FAIL");
+	return differs;
 }

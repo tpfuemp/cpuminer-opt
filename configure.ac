@@ -24,6 +24,38 @@ AM_PROG_AS
 AC_PROG_RANLIB
 AC_PROG_CXX
 
+dnl algo/randomx links the RandomX core twice -- once stock, once with a
+dnl variant's constants -- and renames the second copy's symbols with objcopy.
+dnl AC_CHECK_TOOL, not AC_CHECK_PROG: a cross build must use the target's
+dnl binutils (x86_64-w64-mingw32-objcopy), or the host tools silently fail to
+dnl rewrite a PE archive.
+AC_CHECK_TOOL([NM], [nm], [nm])
+AC_CHECK_TOOL([OBJCOPY], [objcopy], [objcopy])
+
+dnl RandomX is the largest algorithm in the tree, and each variant needs its
+dnl OWN compiled core (their scratchpad sizes and instruction frequencies are
+dnl constexpr in the vendored core and one is an immediate in hand-written
+dnl assembly), so the cost is roughly linear in variants. Two opt-outs for
+dnl size-constrained builds; both default to enabled so nothing changes for
+dnl anyone who does not ask.
+AC_ARG_ENABLE([randomx],
+  [AS_HELP_STRING([--disable-randomx],
+    [omit RandomX entirely: Monero rx/0 and all coin variants])],
+  [], [enable_randomx=yes])
+
+AC_ARG_ENABLE([randomx-variants],
+  [AS_HELP_STRING([--disable-randomx-variants],
+    [keep Monero rx/0 but omit the coin variants (rx/wow, rx/graft, rx/arq)])],
+  [], [enable_randomx_variants=yes])
+
+dnl A variant cannot exist without the base, so --disable-randomx implies it.
+AS_IF([test "x$enable_randomx" = "xno"], [enable_randomx_variants=no])
+
+AM_CONDITIONAL([HAVE_RANDOMX],          [test "x$enable_randomx" = "xyes"])
+AM_CONDITIONAL([HAVE_RANDOMX_VARIANTS], [test "x$enable_randomx_variants" = "xyes"])
+AS_IF([test "x$enable_randomx" = "xyes"],
+      [AC_DEFINE([USE_RANDOMX], [1], [Define to build the RandomX algorithms])])
+
 dnl Checks for header files
 AC_HEADER_STDC
 AC_CHECK_HEADERS([sys/endian.h sys/param.h syslog.h])

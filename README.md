@@ -115,6 +115,11 @@ Supported Algorithms
                           power2b       MicroBitcoin (MBC)
                           quark         Quark
                           qubit         Qubit
+                          randomx       Monero (XMR), rx/0
+                          randomx-sfx   Safex Cash (SFX), rx/sfx
+                          randomx-arq   ArQmA (ARQ), rx/arq
+                          randomx-graft Graft (GRFT), rx/graft
+                          randomx-wow   Wownero (WOW), rx/wow
                           rinhash       RinCoin (RIN)
                           scrypt        scrypt(1024, 1, 1) (default)
                           scrypt:N      scrypt(N, 1, 1)

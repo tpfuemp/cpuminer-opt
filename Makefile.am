@@ -79,9 +79,14 @@ RANDOMX_INCLUDES = $(ALL_INCLUDES) -I$(top_srcdir)/algo/randomx
 RANDOMX_QUIET = -Wno-unknown-warning-option -Wno-unused-function \
   -Wno-unused-variable
 
+if HAVE_RANDOMX
 noinst_LIBRARIES += librandomx.a
 
-librandomx_a_SOURCES = \
+# Shared between the stock core and every per-variant copy. Must be a plain
+# variable holding literal filenames: automake expands one of these into an
+# object list, but it will NOT expand a reference to another *_SOURCES -- doing
+# that yields a library with ZERO objects and no warning.
+RANDOMX_CORE_SRC = \
   algo/randomx/randomx-buildinfo.cpp \
   algo/randomx/randomx/aes_hash.cpp \
   algo/randomx/randomx/allocator.cpp \
@@ -105,18 +110,93 @@ librandomx_a_SOURCES = \
   algo/randomx/randomx/virtual_memory.c \
   algo/randomx/randomx/blake2/blake2b.c
 
-librandomx_a_CPPFLAGS = $(RANDOMX_INCLUDES)
-librandomx_a_CFLAGS   = $(disable_flags) $(RANDOMX_QUIET)
-librandomx_a_CXXFLAGS = $(disable_flags) $(RANDOMX_QUIET)
-librandomx_a_CCASFLAGS = $(RANDOMX_INCLUDES)
+RANDOMX_CORE_CPPFLAGS = $(RANDOMX_INCLUDES)
+RANDOMX_CORE_CFLAGS   = $(disable_flags) $(RANDOMX_QUIET)
+RANDOMX_CORE_CXXFLAGS = $(disable_flags) $(RANDOMX_QUIET)
+
+librandomx_a_SOURCES   = $(RANDOMX_CORE_SRC)
+librandomx_a_CPPFLAGS  = $(RANDOMX_CORE_CPPFLAGS)
+librandomx_a_CFLAGS    = $(RANDOMX_CORE_CFLAGS)
+librandomx_a_CXXFLAGS  = $(RANDOMX_CORE_CXXFLAGS)
+librandomx_a_CCASFLAGS = $(RANDOMX_CORE_CPPFLAGS)
 
 # librandomx.a alone is not linkable: the argon2 satellites define
 # randomx_argon2_impl_{ssse3,avx2}(), which dataset.cpp calls unconditionally
 # (returning NULL when their ISA was not compiled in). Link all three.
 RANDOMX_LIBS = librandomx.a
 
+if HAVE_RANDOMX_VARIANTS
+# ------------------------------------------------ second core: rx/wow
+#
+# rx/wow moves scratchpad sizes, program iterations/count and 8 instruction
+# frequencies. Those are constexpr in the core's common.hpp and one of them is
+# an `and` immediate inside jit_compiler_x86_static.S, so the variant cannot
+# share rx/0's compiled core -- it gets its own, built from the same sources
+# with config/wow.h injected.
+#
+# Both copies define the randomx_* C API and the entire randomx:: C++
+# namespace, so the variant copy is run through prefix-syms.sh, which renames
+# every symbol it DEFINES to rxwow_*. randomx-core.c then binds the prefixed
+# names into a function table. Anything that talks to a core goes through that
+# table; randomx-kat.c deliberately does not, because its vectors are rx/0's.
+#
+# _raw archives are the compiler's output; the prefixed ones are what link.
+noinst_LIBRARIES += librandomx_wow_raw.a
+librandomx_wow_raw_a_SOURCES   = $(RANDOMX_CORE_SRC)
+librandomx_wow_raw_a_CPPFLAGS  = $(RANDOMX_CORE_CPPFLAGS) $(RANDOMX_WOW_CONFIG)
+librandomx_wow_raw_a_CFLAGS    = $(RANDOMX_CORE_CFLAGS)
+librandomx_wow_raw_a_CXXFLAGS  = $(RANDOMX_CORE_CXXFLAGS)
+librandomx_wow_raw_a_CCASFLAGS = $(RANDOMX_CORE_CPPFLAGS) $(RANDOMX_WOW_CONFIG)
+
+RANDOMX_WOW_CONFIG = -include $(top_srcdir)/algo/randomx/config/wow.h
+RANDOMX_PREFIX_SYMS = $(top_srcdir)/algo/randomx/prefix-syms.sh
+RANDOMX_VARIANT_DEFINES = -DRANDOMX_HAVE_WOW_CORE
+
+librandomx_wow.a: librandomx_wow_raw.a $(RANDOMX_PREFIX_SYMS)
+	$(AM_V_GEN)$(SHELL) $(RANDOMX_PREFIX_SYMS) $< $@ rxwow_ "$(NM)" "$(OBJCOPY)"
+
+RANDOMX_LIBS += librandomx_wow.a
+
+# ------------------------------------------------ third core: rx/graft
+# Same mechanism as rx/wow. Graft moves two instruction frequencies and the
+# program size, all constexpr in common.hpp, so it too needs its own core.
+noinst_LIBRARIES += librandomx_graft_raw.a
+librandomx_graft_raw_a_SOURCES   = $(RANDOMX_CORE_SRC)
+librandomx_graft_raw_a_CPPFLAGS  = $(RANDOMX_CORE_CPPFLAGS) $(RANDOMX_GRAFT_CONFIG)
+librandomx_graft_raw_a_CFLAGS    = $(RANDOMX_CORE_CFLAGS)
+librandomx_graft_raw_a_CXXFLAGS  = $(RANDOMX_CORE_CXXFLAGS)
+librandomx_graft_raw_a_CCASFLAGS = $(RANDOMX_CORE_CPPFLAGS) $(RANDOMX_GRAFT_CONFIG)
+
+RANDOMX_GRAFT_CONFIG = -include $(top_srcdir)/algo/randomx/config/graft.h
+RANDOMX_ARQ_CONFIG   = -include $(top_srcdir)/algo/randomx/config/arq.h
+
+librandomx_graft.a: librandomx_graft_raw.a $(RANDOMX_PREFIX_SYMS)
+	$(AM_V_GEN)$(SHELL) $(RANDOMX_PREFIX_SYMS) $< $@ rxgrft_ "$(NM)" "$(OBJCOPY)"
+
+RANDOMX_LIBS += librandomx_graft.a
+RANDOMX_VARIANT_DEFINES += -DRANDOMX_HAVE_GRAFT_CORE
+
+# ------------------------------------------------ fourth core: rx/arq
+# ArQmA moves the scratchpad sizes and the program count/iterations.
+noinst_LIBRARIES += librandomx_arq_raw.a
+librandomx_arq_raw_a_SOURCES   = $(RANDOMX_CORE_SRC)
+librandomx_arq_raw_a_CPPFLAGS  = $(RANDOMX_CORE_CPPFLAGS) $(RANDOMX_ARQ_CONFIG)
+librandomx_arq_raw_a_CFLAGS    = $(RANDOMX_CORE_CFLAGS)
+librandomx_arq_raw_a_CXXFLAGS  = $(RANDOMX_CORE_CXXFLAGS)
+librandomx_arq_raw_a_CCASFLAGS = $(RANDOMX_CORE_CPPFLAGS) $(RANDOMX_ARQ_CONFIG)
+
+librandomx_arq.a: librandomx_arq_raw.a $(RANDOMX_PREFIX_SYMS)
+	$(AM_V_GEN)$(SHELL) $(RANDOMX_PREFIX_SYMS) $< $@ rxarq_ "$(NM)" "$(OBJCOPY)"
+
+RANDOMX_LIBS += librandomx_arq.a
+RANDOMX_VARIANT_DEFINES += -DRANDOMX_HAVE_ARQ_CORE
+endif
+# ^ HAVE_RANDOMX_VARIANTS
+# NB: CLEANFILES is assigned with '=' further down, so the prefixed archives are
+# added there, not here -- a '+=' at this point would be silently discarded.
+
 if ARCH_x86_64
-librandomx_a_SOURCES += \
+RANDOMX_CORE_SRC += \
   algo/randomx/randomx/jit_compiler_x86.cpp \
   algo/randomx/randomx/jit_compiler_x86_static.S
 noinst_LIBRARIES += librandomx_ssse3.a librandomx_avx2.a
@@ -130,18 +210,18 @@ librandomx_avx2_a_CFLAGS = $(disable_flags) $(RANDOMX_QUIET) -mavx2
 else
 # Off x86 both compile to a stub returning NULL, so they need no flags and no
 # separate library -- but they must still be compiled or the link fails.
-librandomx_a_SOURCES += \
+RANDOMX_CORE_SRC += \
   algo/randomx/randomx/argon2_ssse3.c \
   algo/randomx/randomx/argon2_avx2.c
 if ARCH_ARM64
-librandomx_a_SOURCES += \
+RANDOMX_CORE_SRC += \
   algo/randomx/randomx/jit_compiler_a64.cpp \
   algo/randomx/randomx/jit_compiler_a64_static.S
 if HAVE_ASM_HWCAP
 # Without this, cpu.cpp's aarch64 branch cannot see HWCAP_AES, so the
 # hardware-AES path is compiled and then never selected. randomx-kat prints the
 # compile-time and runtime answers side by side.
-librandomx_a_CPPFLAGS += -DHAVE_HWCAP
+RANDOMX_CORE_CPPFLAGS += -DHAVE_HWCAP
 endif
 endif
 endif
@@ -162,6 +242,8 @@ randomx_kat_SOURCES = algo/randomx/randomx-kat-main.c \
 randomx_kat_CPPFLAGS = $(RANDOMX_INCLUDES)
 randomx_kat_CFLAGS = $(disable_flags)
 randomx_kat_LDADD = $(RANDOMX_LIBS) $(EXTRA_LIBS) @PTHREAD_LIBS@
+endif
+# ^ HAVE_RANDOMX
 
 cpuminer_SOURCES = \
   dummy.cpp \
@@ -177,10 +259,6 @@ cpuminer_SOURCES = \
   algo-gate-api.c\
   malloc-huge.c \
   simd-utils/simd-constants.c \
-  algo/randomx/randomx-gate.c \
-  algo/randomx/randomx-stratum.c \
-  algo/randomx/randomx-vm.c \
-  algo/randomx/randomx-kat.c \
   algo/argon2d/argon2d-gate.c \
   algo/argon2d/blake2/blake2b.c \
   algo/argon2d/argon2d/argon2.c \
@@ -497,6 +575,22 @@ else
 endif
 
 cpuminer_LDFLAGS = @LDFLAGS@
+# RandomX sources, or a stub satisfying the seven entry points cpu-miner.c and
+# util.c reference, so neither file needs an #ifdef. rx_algo_is_randomx()
+# answers false in the stub, so those call sites take the bitcoin-stratum path
+# and the remaining stubs are never reached.
+if HAVE_RANDOMX
+cpuminer_SOURCES += \
+  algo/randomx/randomx-gate.c \
+  algo/randomx/randomx-stratum.c \
+  algo/randomx/randomx-vm.c \
+  algo/randomx/randomx-variant.c \
+  algo/randomx/randomx-core.c \
+  algo/randomx/randomx-kat.c
+else
+cpuminer_SOURCES += algo/randomx/randomx-stub.c
+endif
+
 cpuminer_LDADD	= libcurvehash_secp256k1.a $(RANDOMX_LIBS) $(EXTRA_LIBS) @LIBCURL@ -ljansson @PTHREAD_LIBS@ @WS2_LIBS@ -lgmp build-stamp.$(OBJEXT)
 
 # Carries the date for the "SW built on" banner. Depends on the objects, so it
@@ -505,7 +599,10 @@ cpuminer_LDADD	= libcurvehash_secp256k1.a $(RANDOMX_LIBS) $(EXTRA_LIBS) @LIBCURL
 # in cpu-miner.c cannot do this -- make does not recompile that file when some
 # other one changes.
 EXTRA_cpuminer_DEPENDENCIES = build-stamp.$(OBJEXT)
-CLEANFILES = build-stamp.c build-stamp.$(OBJEXT)
+CLEANFILES = build-stamp.c build-stamp.$(OBJEXT) \
+  librandomx_wow.a librandomx_wow.a.syms \
+  librandomx_graft.a librandomx_graft.a.syms \
+  librandomx_arq.a librandomx_arq.a.syms
 
 build-stamp.c: $(cpuminer_OBJECTS) libcurvehash_secp256k1.a $(RANDOMX_LIBS)
 	$(AM_V_GEN)printf 'const char build_stamp_date[] = "%s";\n' \
@@ -513,7 +610,7 @@ build-stamp.c: $(cpuminer_OBJECTS) libcurvehash_secp256k1.a $(RANDOMX_LIBS)
 
 build-stamp.$(OBJEXT): build-stamp.c
 	$(AM_V_CC)$(CC) $(CFLAGS) -c -o $@ build-stamp.c
-cpuminer_CPPFLAGS = @LIBCURL_CPPFLAGS@ $(ALL_INCLUDES)
+cpuminer_CPPFLAGS = @LIBCURL_CPPFLAGS@ $(ALL_INCLUDES) $(RANDOMX_VARIANT_DEFINES)
 cpuminer_CFLAGS = -Wno-pointer-sign -Wno-pointer-to-int-cast $(disable_flags)
 
 if ARCH_ARM64

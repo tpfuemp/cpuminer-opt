@@ -57,4 +57,53 @@ const char *randomx_build_simd(void)
 #endif
 }
 
+/* This TU is compiled once per variant core, so these report the constants
+ * THIS core was built with -- which is the whole point: a caller reading
+ * configuration.h directly always gets rx/0's values. */
+unsigned long randomx_build_scratchpad_size(void)
+{
+	return (unsigned long)RANDOMX_SCRATCHPAD_L3;
+}
+
+unsigned long randomx_build_program_count(void)
+{
+	return (unsigned long)RANDOMX_PROGRAM_COUNT;
+}
+
+unsigned long randomx_build_program_iterations(void)
+{
+	return (unsigned long)RANDOMX_PROGRAM_ITERATIONS;
+}
+
+/* Defined in this core's dataset.cpp; each core has its own copy, so this
+ * reports the salt in force for THIS core rather than the stock one. */
+extern const unsigned char *randomx_argon_salt;
+extern unsigned int         randomx_argon_salt_len;
+
+unsigned long randomx_build_argon_salt_len(void)
+{
+	(void)randomx_argon_salt;
+	return (unsigned long)randomx_argon_salt_len;
+}
+
+unsigned long randomx_build_argon_memory(void)
+{
+	return (unsigned long)RANDOMX_ARGON_MEMORY;
+}
+
+unsigned long randomx_build_program_size(void)
+{
+	return (unsigned long)RANDOMX_PROGRAM_SIZE_V1;
+}
+
+unsigned long randomx_build_argon_iterations(void)
+{
+	return (unsigned long)RANDOMX_ARGON_ITERATIONS;
+}
+
+unsigned long randomx_build_superscalar_latency(void)
+{
+	return (unsigned long)RANDOMX_SUPERSCALAR_LATENCY;
+}
+
 } /* extern "C" */

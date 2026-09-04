@@ -731,6 +731,10 @@ enum algos {
         ALGO_QUARK,
         ALGO_QUBIT,
         ALGO_RANDOMX,
+        ALGO_RANDOMX_ARQ,
+        ALGO_RANDOMX_GRAFT,
+        ALGO_RANDOMX_SFX,
+        ALGO_RANDOMX_WOW,
         ALGO_RINHASH,
         ALGO_SCRYPT,
         ALGO_SHA256CSM,
@@ -861,6 +865,10 @@ static const char* const algo_names[] = {
         "quark",
         "qubit",
         "randomx",
+        "randomx-arq",
+        "randomx-graft",
+        "randomx-sfx",
+        "randomx-wow",
         "rinhash",
         "scrypt",
         "sha256csm",
@@ -1057,6 +1065,11 @@ Options:\n\
                           power2b       MicroBitcoin (MBC)\n\
                           quark         Quark\n\
                           qubit         Qubit\n\
+                          randomx       Monero (XMR), rx/0\n\
+                          randomx-arq   ArQmA (ARQ), rx/arq\n\
+                          randomx-graft Graft (GRFT), rx/graft\n\
+                          randomx-sfx   Safex Cash (SFX), rx/sfx\n\
+                          randomx-wow   Wownero (WOW), rx/wow\n\
                           rinhash       RinCoin (RIN)\n\
                           scrypt        scrypt(1024, 1, 1) (default)\n\
                           scrypt:N      scrypt(N, 1, 1)\n\

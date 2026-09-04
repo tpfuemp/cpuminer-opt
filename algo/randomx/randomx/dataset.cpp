@@ -55,6 +55,24 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 static_assert(RANDOMX_ARGON_MEMORY % (RANDOMX_ARGON_LANES * ARGON2_SYNC_POINTS) == 0, "RANDOMX_ARGON_MEMORY - invalid value");
 static_assert(ARGON2_BLOCK_SIZE == randomx::ArgonBlockSize, "Unpexpected value of ARGON2_BLOCK_SIZE");
 
+/* cpuminer-opt local change (see internal notes; not upstream).
+ *
+ * The argon2d salt is the entire difference between rx/0 and variants such as
+ * rx/sfx, and it is consumed only here, once per epoch, when the cache is
+ * built -- it reaches neither the VM nor the JIT. Making it runtime therefore
+ * costs nothing measurable and avoids compiling a second copy of the core for
+ * a variant that differs by one string.
+ *
+ * Defaults to the compile-time value, so a build that never calls the setter
+ * behaves exactly as before. Set it once before the first cache init and
+ * never again: the cache is shared and rebuilt under a writer lock, so a
+ * mid-flight change would produce a cache keyed on a salt no longer in force.
+ */
+extern "C" {
+	const unsigned char *randomx_argon_salt     = (const unsigned char *)RANDOMX_ARGON_SALT;
+	unsigned int         randomx_argon_salt_len = (unsigned int)randomx::ArgonSaltSize;
+}
+
 namespace randomx {
 
 	template<class Allocator>
@@ -77,8 +95,8 @@ namespace randomx {
 		context.outlen = 0;
 		context.pwd = CONST_CAST(uint8_t *)key;
 		context.pwdlen = (uint32_t)keySize;
-		context.salt = CONST_CAST(uint8_t *)RANDOMX_ARGON_SALT;
-		context.saltlen = (uint32_t)randomx::ArgonSaltSize;
+		context.salt = CONST_CAST(uint8_t *)randomx_argon_salt;
+		context.saltlen = (uint32_t)randomx_argon_salt_len;
 		context.secret = NULL;
 		context.secretlen = 0;
 		context.ad = NULL;

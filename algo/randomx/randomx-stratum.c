@@ -95,12 +95,19 @@ static bool rx_parse_job( struct stratum_ctx *sctx, json_t *job )
       return false;
    }
 
-   /* Only rx/0 is implemented. Other variants differ in compile-time constants
-    * the vendored core bakes in, so mining them would yield only rejects. */
-   if ( algo && strcmp( algo, "rx/0" ) )
+   /* Refuse a variant we are not selected for rather than mining it wrong.
+    * Variants differ in the argon salt or in VM/JIT constants, so a mismatch
+    * yields 100% rejects, never a silent near-miss.
+    *
+    * A job with no "algo" field is accepted as the selected variant, which is
+    * what rx/0 pools that predate the field expect, and pools are seen in the
+    * wild sending it as null. Making the field mandatory, or deriving the
+    * variant from the height, is owed at the Monero v2 fork: until then a v2
+    * job without the field would be hashed as v1 and rejected wholesale. */
+   if ( algo && strcmp( algo, rx_variant_pool_algo() ) )
    {
-      applog( LOG_ERR, "RandomX: pool wants algo '%s', this build only "
-                       "implements rx/0", algo );
+      applog( LOG_ERR, "RandomX: pool wants algo '%s', this run mines '%s'",
+              algo, rx_variant_pool_algo() );
       return false;
    }
 
@@ -169,11 +176,14 @@ bool rx_stratum_login( struct stratum_ctx *sctx, const char *user,
    if ( !req )
       return false;
 
+   /* "algo" is an array so a miner can advertise a capability set and let the
+    * pool choose. Advertise only the one variant this run can actually hash --
+    * offering more would invite a job we would then have to refuse. */
    snprintf( req, len,
       "{\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"login\",\"params\":{"
       "\"login\":\"%s\",\"pass\":\"%s\",\"agent\":\"" USER_AGENT "\","
-      "\"algo\":[\"rx/0\"]}}",
-      user ? user : "", pass ? pass : "" );
+      "\"algo\":[\"%s\"]}}",
+      user ? user : "", pass ? pass : "", rx_variant_pool_algo() );
 
    if ( !stratum_send_line( sctx, req ) )
    {

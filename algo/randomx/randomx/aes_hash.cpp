@@ -43,13 +43,25 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //state0, state1, state2, state3 = Blake2b-512("RandomX AesHash1R state")
 //xkey0, xkey1 = Blake2b-256("RandomX AesHash1R xkeys")
 
+#ifndef AES_HASH_1R_STATE0
 #define AES_HASH_1R_STATE0 0xd7983aad, 0xcc82db47, 0x9fa856de, 0x92b52c0d
+#endif
+#ifndef AES_HASH_1R_STATE1
 #define AES_HASH_1R_STATE1 0xace78057, 0xf59e125a, 0x15c7b798, 0x338d996e
+#endif
+#ifndef AES_HASH_1R_STATE2
 #define AES_HASH_1R_STATE2 0xe8a07ce4, 0x5079506b, 0xae62c7d0, 0x6a770017
+#endif
+#ifndef AES_HASH_1R_STATE3
 #define AES_HASH_1R_STATE3 0x7e994948, 0x79a10005, 0x07ad828d, 0x630a240c
+#endif
 
+#ifndef AES_HASH_1R_XKEY0
 #define AES_HASH_1R_XKEY0 0x06890201, 0x90dc56bf, 0x8b24949f, 0xf6fa8389
+#endif
+#ifndef AES_HASH_1R_XKEY1
 #define AES_HASH_1R_XKEY1 0xed18f99b, 0xee1043c6, 0x51f4e03c, 0x61b263d1
+#endif
 
 /*
 	Calculate a 512-bit hash of 'input' using 4 lanes of AES.
@@ -133,10 +145,18 @@ template void hashAes1Rx4<true>(const void *input, size_t inputSize, void *hash)
 //AesGenerator1R:
 //key0, key1, key2, key3 = Blake2b-512("RandomX AesGenerator1R keys")
 
+#ifndef AES_GEN_1R_KEY0
 #define AES_GEN_1R_KEY0 0xb4f44917, 0xdbb5552b, 0x62716609, 0x6daca553
+#endif
+#ifndef AES_GEN_1R_KEY1
 #define AES_GEN_1R_KEY1 0x0da1dc4e, 0x1725d378, 0x846a710d, 0x6d7caf07
+#endif
+#ifndef AES_GEN_1R_KEY2
 #define AES_GEN_1R_KEY2 0x3e20e345, 0xf4c0794f, 0x9f947ec6, 0x3f1262f1
+#endif
+#ifndef AES_GEN_1R_KEY3
 #define AES_GEN_1R_KEY3 0x49169154, 0x16314c88, 0xb1ba317c, 0x6aef8135
+#endif
 
 /*
 	Fill 'buffer' with pseudorandom data based on 512-bit 'state'.
@@ -207,14 +227,30 @@ template void fillAes1Rx4<false>(void *state, size_t outputSize, void *buffer);
 //key0, key1, key2, key3 = Blake2b-512("RandomX AesGenerator4R keys 0-3")
 //key4, key5, key6, key7 = Blake2b-512("RandomX AesGenerator4R keys 4-7")
 
+#ifndef AES_GEN_4R_KEY0
 #define AES_GEN_4R_KEY0 0x99e5d23f, 0x2f546d2b, 0xd1833ddb, 0x6421aadd
+#endif
+#ifndef AES_GEN_4R_KEY1
 #define AES_GEN_4R_KEY1 0xa5dfcde5, 0x06f79d53, 0xb6913f55, 0xb20e3450
+#endif
+#ifndef AES_GEN_4R_KEY2
 #define AES_GEN_4R_KEY2 0x171c02bf, 0x0aa4679f, 0x515e7baf, 0x5c3ed904
+#endif
+#ifndef AES_GEN_4R_KEY3
 #define AES_GEN_4R_KEY3 0xd8ded291, 0xcd673785, 0xe78f5d08, 0x85623763
+#endif
+#ifndef AES_GEN_4R_KEY4
 #define AES_GEN_4R_KEY4 0x229effb4, 0x3d518b6d, 0xe3d6a7a6, 0xb5826f73
+#endif
+#ifndef AES_GEN_4R_KEY5
 #define AES_GEN_4R_KEY5 0xb272b7d2, 0xe9024d4e, 0x9c10b3d9, 0xc7566bf3
+#endif
+#ifndef AES_GEN_4R_KEY6
 #define AES_GEN_4R_KEY6 0xf63befa7, 0x2ba9660a, 0xf765a38b, 0xf273c9e7
+#endif
+#ifndef AES_GEN_4R_KEY7
 #define AES_GEN_4R_KEY7 0xc0b0762d, 0x0c06d1fd, 0x915839de, 0x7a7cd609
+#endif
 
 template<bool softAes>
 void fillAes4Rx4(void *state, size_t outputSize, void *buffer) {

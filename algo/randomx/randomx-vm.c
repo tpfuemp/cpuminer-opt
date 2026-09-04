@@ -23,6 +23,7 @@
 
 #include "miner.h"
 #include "randomx-gate.h"
+#include "randomx-core.h"
 #include "randomx/randomx.h"
 #include "randomx/configuration.h"   /* RANDOMX_ARGON_MEMORY, for the advice */
 #include "randomx-buildinfo.h"
@@ -70,7 +71,7 @@ struct ds_range { unsigned long start, count; };
 static void *ds_init_thread( void *arg )
 {
    struct ds_range *r = (struct ds_range*) arg;
-   randomx_init_dataset( rx_dataset, rx_cache, r->start, r->count );
+   rx_core->init_dataset( rx_dataset, rx_cache, r->start, r->count );
    return NULL;
 }
 
@@ -151,11 +152,16 @@ static void rx_advise_hugepages( size_t dataset_bytes, int nthreads )
       return;
    }
 
-   /* dataset + cache + one 2 MiB scratchpad per thread, rounded up to whole
-    * pages, plus headroom for the JIT code buffers. */
+   /* dataset + cache + one scratchpad per thread, rounded up to whole pages,
+    * plus headroom for the JIT code buffers.
+    *
+    * The scratchpad size comes from the SELECTED core, not from
+    * RANDOMX_SCRATCHPAD_L3: this file is compiled once against the stock
+    * configuration, so that macro says 2 MiB even when a variant core with a
+    * 1 MiB scratchpad is in force, and the advice would overstate the need. */
    need = ( dataset_bytes + hp - 1 ) / hp
-        + ( (size_t)RANDOMX_ARGON_MEMORY * 1024 + hp - 1 ) / hp
-        + ( (size_t)nthreads * 2u * 1024 * 1024 + hp - 1 ) / hp
+        + ( (size_t)rx_core->argon_memory() * 1024 + hp - 1 ) / hp
+        + ( (size_t)nthreads * rx_core->scratchpad_size() + hp - 1 ) / hp
         + 8;
 
    applog( LOG_NOTICE, "RandomX: huge pages are unavailable and are worth "
@@ -171,22 +177,22 @@ static void rx_advise_hugepages( size_t dataset_bytes, int nthreads )
 static bool rx_alloc( void )
 {
    randomx_flags cf;
-   const size_t ds_bytes = (size_t)randomx_dataset_item_count()
+   const size_t ds_bytes = (size_t)rx_core->dataset_item_count()
                          * RANDOMX_DATASET_ITEM_SIZE;
    const int nthr = opt_n_threads > 0 ? opt_n_threads : 1;
 
-   rx_flags = randomx_get_flags();
+   rx_flags = rx_core->get_flags();
 
    /* Large pages are a big win for RandomX -- 2 GB of dependent random reads
     * punishes the TLB -- but the allocation fails outright rather than
     * degrading, so every one of these is "try large, then plain". */
    cf = rx_flags & ( RANDOMX_FLAG_JIT | RANDOMX_FLAG_ARGON2 );
 
-   rx_cache = randomx_alloc_cache( cf | RANDOMX_FLAG_LARGE_PAGES );
+   rx_cache = rx_core->alloc_cache( cf | RANDOMX_FLAG_LARGE_PAGES );
    rx_cache_lp = ( rx_cache != NULL );
    if ( !rx_cache )
    {
-      rx_cache = randomx_alloc_cache( cf );
+      rx_cache = rx_core->alloc_cache( cf );
       if ( !rx_cache )
       {
          applog( LOG_ERR, "RandomX: cache allocation failed (need %u MiB)",
@@ -200,10 +206,10 @@ static bool rx_alloc( void )
 
    /* Fast mode. Fall back to light mode rather than refusing to mine: light
     * mode is 5-10x slower but works on small boxes. */
-   rx_dataset = randomx_alloc_dataset( RANDOMX_FLAG_LARGE_PAGES );
+   rx_dataset = rx_core->alloc_dataset( RANDOMX_FLAG_LARGE_PAGES );
    rx_dataset_lp = ( rx_dataset != NULL );
    if ( !rx_dataset )
-      rx_dataset = randomx_alloc_dataset( RANDOMX_FLAG_DEFAULT );
+      rx_dataset = rx_core->alloc_dataset( RANDOMX_FLAG_DEFAULT );
 
    rx_full_mode = ( rx_dataset != NULL );
    if ( rx_full_mode )
@@ -281,11 +287,11 @@ static bool rx_reseed( const unsigned char *seed )
 
    pthread_rwlock_wrlock( &rx_lock );
 
-   randomx_init_cache( rx_cache, seed, 32 );
+   rx_core->init_cache( rx_cache, seed, 32 );
 
    if ( rx_full_mode )
    {
-      unsigned long count = randomx_dataset_item_count();
+      unsigned long count = rx_core->dataset_item_count();
       int nthr = opt_n_threads > 0 ? opt_n_threads : 1;
       pthread_t *tids;
       struct ds_range *ranges;
@@ -317,7 +323,7 @@ static bool rx_reseed( const unsigned char *seed )
          unsigned long done = started ? ranges[started-1].start
                                       + ranges[started-1].count : 0;
          if ( done < count )
-            randomx_init_dataset( rx_dataset, rx_cache, done, count - done );
+            rx_core->init_dataset( rx_dataset, rx_cache, done, count - done );
       }
 
       free( tids );
@@ -416,7 +422,7 @@ void rx_vm_free( int thr_id )
       return;
    if ( rx_vms[thr_id] )
    {
-      randomx_destroy_vm( rx_vms[thr_id] );
+      rx_core->destroy_vm( rx_vms[thr_id] );
       rx_vms[thr_id] = NULL;      /* idempotent: lets a later init remake it */
       rx_vm_epoch[thr_id] = 0;
    }
@@ -448,29 +454,32 @@ randomx_vm *rx_vm_get( int thr_id )
    {
       randomx_dataset *ds = rx_full_mode ? rx_dataset : NULL;
 
-      /* The VM owns this thread's 2 MiB scratchpad, and it is a THIRD
+      /* The VM owns this thread's scratchpad (2 MiB on rx/0, 1 MiB on
+       * rx/wow), and it is a THIRD
        * large-page allocation independent of the cache and dataset -- asking
        * only those two leaves the hottest working set on 4 KiB pages.
        * randomx_create_vm catches bad_alloc and returns NULL, so the ladder is
        * safe: large pages, then normal, then without the JIT (which needs an
        * executable mapping and can fail under W^X). */
-      vm = randomx_create_vm( rx_flags | RANDOMX_FLAG_LARGE_PAGES,
+      vm = rx_core->create_vm( rx_flags | RANDOMX_FLAG_LARGE_PAGES,
                               rx_cache, ds );
       if ( vm )
       {
          if ( !rx_vm_lp_warned )
          {
             rx_vm_lp_warned = true;
-            applog( LOG_INFO, "RandomX scratchpad: 2 MiB/thread, large pages" );
+            applog( LOG_INFO, "RandomX scratchpad: %lu KiB/thread, large pages",
+                    rx_core->scratchpad_size() / 1024 );
          }
       }
       else
       {
-         vm = randomx_create_vm( rx_flags, rx_cache, ds );
+         vm = rx_core->create_vm( rx_flags, rx_cache, ds );
          if ( vm && !rx_vm_lp_warned )
          {
             rx_vm_lp_warned = true;
-            applog( LOG_INFO, "RandomX scratchpad: 2 MiB/thread, normal pages" );
+            applog( LOG_INFO, "RandomX scratchpad: %lu KiB/thread, normal pages",
+                    rx_core->scratchpad_size() / 1024 );
          }
       }
 
@@ -479,7 +488,7 @@ randomx_vm *rx_vm_get( int thr_id )
          /* Most likely the JIT could not get an executable page (W^X, or a
           * hardened kernel). The interpreter always works, so retry without
           * it rather than dropping the thread. */
-         vm = randomx_create_vm( rx_flags & ~RANDOMX_FLAG_JIT, rx_cache, ds );
+         vm = rx_core->create_vm( rx_flags & ~RANDOMX_FLAG_JIT, rx_cache, ds );
          if ( vm )
             applog( LOG_WARNING, "RandomX thread %d: JIT unavailable, using "
                                  "the interpreter (much slower)", thr_id );
@@ -492,9 +501,9 @@ randomx_vm *rx_vm_get( int thr_id )
       /* Seed changed under us. The cache and dataset buffers were reused in
        * place, so the pointers are unchanged -- but the VM caches derived
        * state, so it still has to be told. */
-      randomx_vm_set_cache( vm, rx_cache );
+      rx_core->vm_set_cache( vm, rx_cache );
       if ( rx_full_mode )
-         randomx_vm_set_dataset( vm, rx_dataset );
+         rx_core->vm_set_dataset( vm, rx_dataset );
       rx_vm_epoch[thr_id] = epoch;
    }
 

@@ -23,7 +23,9 @@
 
 set -u
 
-export LOCAL_LIB="$HOME/usr/lib"
+# Overridable so the cross-deps can live somewhere a home tidy-up will not eat
+# them, e.g. LOCAL_LIB=~/cpuminer-opt/winbuild/lib. Default unchanged.
+export LOCAL_LIB="${LOCAL_LIB:-$HOME/usr/lib}"
 export CURL_PREFIX="$LOCAL_LIB/curl"
 CROSS=x86_64-w64-mingw32
 

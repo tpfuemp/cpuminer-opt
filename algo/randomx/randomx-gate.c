@@ -17,6 +17,7 @@
 #include "miner.h"
 #include "algo-gate-api.h"
 #include "randomx-gate.h"
+#include "randomx-core.h"
 #include "randomx/randomx.h"
 
 /* --------------------------------------------------------------- helpers */
@@ -95,7 +96,7 @@ int scanhash_randomx( struct work *work, uint32_t max_nonce,
    do
    {
       le32enc( blob + RX_NONCE_OFFSET, n );
-      randomx_calculate_hash( vm, blob, blob_len, hash );
+      rx_core->calculate_hash( vm, blob, blob_len, hash );
       done++;
 
       if ( unlikely( rx_hash_tail( hash ) < target ) )
@@ -109,7 +110,7 @@ int scanhash_randomx( struct work *work, uint32_t max_nonce,
 
 #else /* batched */
 
-   /* Batched driver: randomx_calculate_hash_next() finalises the in-flight hash
+   /* Batched driver: rx_core->calculate_hash_next() finalises the in-flight hash
     * and fills the scratchpad for the next input in one pass, instead of a
     * separate getFinalResult plus initScratchpad.
     *
@@ -122,7 +123,7 @@ int scanhash_randomx( struct work *work, uint32_t max_nonce,
     * Abandoning a batch mid-flight is safe: _first() just recomputes tempHash
     * and re-inits the scratchpad, holding nothing that needs releasing. */
    le32enc( blob + RX_NONCE_OFFSET, n );
-   randomx_calculate_hash_first( vm, blob, blob_len );
+   rx_core->calculate_hash_first( vm, blob, blob_len );
    pending = n;
 
    for ( ;; )
@@ -132,11 +133,11 @@ int scanhash_randomx( struct work *work, uint32_t max_nonce,
                         || work_restart[ thr_id ].restart;
 
       if ( last )
-         randomx_calculate_hash_last( vm, hash );        /* digest of pending */
+         rx_core->calculate_hash_last( vm, hash );        /* digest of pending */
       else
       {
          le32enc( blob + RX_NONCE_OFFSET, next );
-         randomx_calculate_hash_next( vm, blob, blob_len, hash );
+         rx_core->calculate_hash_next( vm, blob, blob_len, hash );
       }                                                  /* digest of pending */
       done++;
 
@@ -170,7 +171,7 @@ int scanhash_randomx( struct work *work, uint32_t max_nonce,
 
       memcpy( verify_blob, work->data, blob_len );
       le32enc( verify_blob + RX_NONCE_OFFSET, found_nonce );
-      randomx_calculate_hash( vm, verify_blob, blob_len, verify_hash );
+      rx_core->calculate_hash( vm, verify_blob, blob_len, verify_hash );
       done++;
 
       if ( unlikely( memcmp( verify_hash, hash, 32 ) != 0 ) )
@@ -283,12 +284,16 @@ static void rx_miner_thread_free( int thr_id )
 }
 
 /* Reported to the startup thread-count auto-cap. The dataset and cache are
- * SHARED, not per-thread -- only each VM's 2 MiB scratchpad and the JIT code
- * buffer scale with -t. Reporting the dataset here would make the cap believe
- * 8 threads need ~19 GB and refuse to start. */
+ * SHARED, not per-thread -- only each VM's scratchpad and the JIT code buffer
+ * scale with -t. Reporting the dataset here would make the cap believe 8
+ * threads need ~19 GB and refuse to start.
+ *
+ * The scratchpad size comes from the selected core: it is 2 MiB for rx/0 but
+ * 1 MiB for rx/wow and 256 KiB for rx/arq, and hardcoding 2 MiB made the cap
+ * over-reserve by 8x for the smallest variant. */
 static size_t rx_get_workspace_size( void )
 {
-   return 2u * 1024 * 1024 + 64 * 1024;
+   return (size_t)rx_core->scratchpad_size() + 64 * 1024;
 }
 
 /* --------------------------------------------------------- registration */
@@ -308,7 +313,7 @@ bool register_randomx_algo( algo_gate_t *gate )
    gate->nonce_index = RX_NONCE_WORD;
 
    /* The vendored core picks JIT vs interpreter and hard vs soft AES at runtime
-    * from randomx_get_flags(), so it runs anywhere. This set is only what it
+    * from rx_core->get_flags(), so it runs anywhere. This set is only what it
     * can use, for the startup banner. */
    gate->optimizations = SSE2_OPT | AES_OPT | AVX2_OPT | NEON_OPT;
 
@@ -330,10 +335,36 @@ bool register_randomx_algo( algo_gate_t *gate )
       return false;
    }
 
+   /* Order matters. The self-test's vectors are rx/0's, so it must run under
+    * rx/0's argon salt -- i.e. before any variant is applied. It validates the
+    * engine (argon2 fill, interpreter, JIT, both AES paths), all of which a
+    * salt-only variant shares bit for bit. */
    if ( !rx_kat_selftest() )
    {
       applog( LOG_ERR, "RandomX self-test FAILED -- refusing to mine" );
       return false;
+   }
+
+   /* Now switch the core to this run's variant and verify it. Upstream
+    * publishes vectors for rx/0 only, so a variant is checked either against
+    * a real vector reconstructed from a share a pool accepted (rx/sfx has
+    * one) or, until it has ever been accepted anywhere, against a
+    * differential with rx/0 -- same key and input, different salt, therefore
+    * a different digest. The weaker check still catches the failure that
+    * matters: a variant whose salt never reached the core would otherwise
+    * look healthy right up to 100% rejects. */
+   if ( !rx_variant_select( opt_algo ) )
+      return false;
+
+   if ( opt_algo != ALGO_RANDOMX )
+   {
+      const rx_variant_t *v = rx_variant();
+      if ( !( v->selftest ? v->selftest() : rx_variant_differs_from_rx0() ) )
+      {
+         applog( LOG_ERR, "RandomX %s self-test FAILED -- refusing to mine",
+                 v->pool_algo );
+         return false;
+      }
    }
 
    return true;
