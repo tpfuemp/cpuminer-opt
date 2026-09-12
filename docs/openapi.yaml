@@ -2,11 +2,11 @@ openapi: 3.1.0
 
 # Machine-readable form of docs/api-rest.md. That document is the authority;
 # this file must not add, rename or contradict anything in it. Both files are
-# byte-identical in the GPU and CPU miner repositories; keeping them so is a
+# byte-identical in the three implementing repositories; keeping them so is a
 # maintainer process and needs no action from a consumer of this file.
 #
 # Status: specification. Read the capability list from `GET /api/v1/` to learn
-# what a given miner and configuration actually serve — implementations are
+# what a given miner and configuration actually serve -- implementations are
 # expected to answer `501` for the rest rather than hide the route.
 #
 # `/metrics` is Prometheus text exposition, so only its media type is described
@@ -16,16 +16,20 @@ openapi: 3.1.0
 info:
   title: Miner REST API
   version: "1.0"
-  summary: One control and monitoring contract implemented by a GPU miner and a CPU miner.
+  summary: One control and monitoring contract implemented by two GPU miners and a CPU miner.
   description: |
-    Identical paths, verbs, field names and error model on both miners. Where one
-    cannot serve a resource it answers `501 not_implemented` on the same path
-    rather than `404`, so a client sees a capability flip and never a route
-    appearing or disappearing.
+    Identical paths, verbs, field names and error model on all three miners.
+    Where one cannot serve a resource it answers `501 not_implemented` on the
+    same path rather than `404`, so a client sees a capability flip and never a
+    route appearing or disappearing.
 
     Clients branch on `miner.kind` (`gpu` / `cpu`) and on the capability list
     from `GET /api/v1/`. `miner.name` is a free-form identifier and must not be
     used for capability decisions.
+
+    Two implementations report `gpu` and do not serve the same routes, so route
+    availability is read from the capability list and never inferred from
+    `miner.kind`.
   license:
     name: GPL-3.0-or-later
 
@@ -51,7 +55,7 @@ paths:
     get:
       tags: [discovery]
       operationId: getIndex
-      summary: Capability discovery — the only endpoint a client should hardcode.
+      summary: Capability discovery -- the only endpoint a client should hardcode.
       parameters: [{ $ref: '#/components/parameters/pretty' }]
       responses:
         '200':
@@ -122,7 +126,7 @@ paths:
       tags: [read]
       operationId: getDevices
       description: |
-        The expensive route — it queries the vendor telemetry libraries. Poll
+        The expensive route -- it queries the vendor telemetry libraries. Poll
         `/summary` or `/health` instead when only rates are needed.
       parameters: [{ $ref: '#/components/parameters/pretty' }]
       responses:
@@ -249,7 +253,7 @@ paths:
       tags: [read]
       operationId: getHealth
       description: |
-        Cheap enough to poll every 5 s — no vendor telemetry calls. A
+        Cheap enough to poll every 5 s -- no vendor telemetry calls. A
         deliberately stopped miner is `200` with `mining: false`; a
         manager-initiated stop is not a fault.
       parameters: [{ $ref: '#/components/parameters/pretty' }]
@@ -266,7 +270,7 @@ paths:
                     properties:
                       health: { $ref: '#/components/schemas/Health' }
         '503':
-          description: Degraded — `status` is `degraded` and `reasons` is populated.
+          description: Degraded -- `status` is `degraded` and `reasons` is populated.
           content:
             application/json:
               schema:
@@ -410,7 +414,7 @@ paths:
     post:
       tags: [write]
       operationId: switchPool
-      description: Requires write privilege. `501` on a `cpu` miner by design — it has no pool array.
+      description: Requires write privilege. `501` on a `cpu` miner by design -- it has no pool array.
       requestBody:
         required: true
         content:
@@ -487,7 +491,7 @@ paths:
       operationId: quit
       description: |
         Terminates the process. The `200` is flushed before the shutdown flag is
-        acted on. This is not a stop verb — nothing can restart the miner
+        acted on. This is not a stop verb -- nothing can restart the miner
         afterwards; use `/control/stop` for a reversible stop.
       responses:
         '200':
@@ -508,7 +512,7 @@ paths:
     get:
       tags: [control]
       operationId: getControlState
-      description: Read privilege — a manager is expected to poll this.
+      description: Read privilege -- a manager is expected to poll this.
       parameters: [{ $ref: '#/components/parameters/pretty' }]
       responses:
         '200':
@@ -578,11 +582,11 @@ paths:
         step fails, all are rolled back and the response is `409`; a
         half-switched miner is never a possible outcome.
 
-        `algo` and `pool` must be sent together — an `algo` without a `pool` is
+        `algo` and `pool` must be sent together -- an `algo` without a `pool` is
         `400`, because mining algorithm X against a pool expecting Y produces
         100% rejected shares while every other metric looks healthy.
 
-        Legal bodies: `algo`+`pool` (± `params`, `run`); `pool` alone to
+        Legal bodies: `algo`+`pool` (+/- `params`, `run`); `pool` alone to
         re-target the same algorithm; `params` alone to retune; `run` alone as a
         synonym for start/pause.
       requestBody:
@@ -604,7 +608,7 @@ paths:
                       control: { $ref: '#/components/schemas/ControlState' }
         '202':
           description: |
-            Accepted but not complete — a slow parameter could not finish inside
+            Accepted but not complete -- a slow parameter could not finish inside
             `wait_ms`. Poll `/control/state` until `state` leaves `switching`.
           content:
             application/json:
@@ -629,7 +633,7 @@ paths:
       description: |
         Prometheus text exposition. Read privilege; when `--api-token` is set it
         is required here too. Metric names, types and labels are documented in
-        docs/api-rest.md — OpenAPI cannot express them.
+        docs/api-rest.md -- OpenAPI cannot express them.
       responses:
         '200':
           description: Prometheus exposition format.
@@ -647,7 +651,7 @@ components:
       scheme: bearer
       description: |
         Set with `--api-token`. When set it is required on every route, reads and
-        `/metrics` included — hashrate and pool identity are exactly what an
+        `/metrics` included -- hashrate and pool identity are exactly what an
         intruder would want.
 
   parameters:
@@ -756,7 +760,7 @@ components:
           type: string
           description: |
             Free-form implementation identifier, for logs and dashboards only.
-            Never branch on it — branch on `kind`.
+            Never branch on it -- branch on `kind`.
         version:     { type: string }
         api_version: { type: string, description: "Contract revision, not the miner version.", examples: ["1.0"] }
         kind:        { type: string, enum: [gpu, cpu] }
@@ -854,8 +858,9 @@ components:
     Device:
       type: object
       description: |
-        A common shell plus exactly one typed sub-object. Clients must tolerate
-        either sub-object being absent.
+        A common shell plus a typed sub-object naming the device class, and on
+        one implementation a second naming the compute stack. Clients must
+        tolerate any sub-object being absent.
       properties:
         id:                     { type: integer }
         type:                   { type: string, enum: [gpu, cpu] }
@@ -885,6 +890,23 @@ components:
             nvml_id:             { type: [integer, "null"] }
             nvapi_id:            { type: [integer, "null"] }
             monitoring:          { type: [boolean, "null"] }
+        vulkan:
+          type: object
+          description: |
+            Present on the Vulkan GPU miner only, beside `gpu` rather than
+            instead of it. Additive: a client that does not know these fields
+            ignores them.
+          properties:
+            driver:        { type: [string, "null"], description: Vulkan driver version. }
+            api_version:   { type: [string, "null"], description: Vulkan API level the device reports. }
+            backend:       { type: [string, "null"] }
+            int64:         { type: [boolean, "null"], description: Device advertises 64-bit integer support in shaders. }
+            tuned:         { type: [boolean, "null"], description: A tuning pass has settled for this device. }
+            workgroup:     { type: [integer, "null"], description: "Settled local workgroup size; null until tuned." }
+            queue_depth:   { type: [integer, "null"], description: "Dispatches kept in flight; null until tuned." }
+            kernel:        { type: [string, "null"], description: "Kernel variant the tuner selected; null until tuned." }
+            batches_total: { type: [integer, "null"], description: Dispatches issued to this device since process start. }
+            batches_late:  { type: [integer, "null"], description: Dispatches whose result arrived after the job had moved on. }
         cpu:
           type: object
           properties:
@@ -1046,7 +1068,7 @@ components:
         min_interval_s:    { type: integer }
         ready_for_switch:
           type: boolean
-          description: false while the anti-flap interval is unexpired — check it to avoid a 429.
+          description: false while the anti-flap interval is unexpired -- check it to avoid a 429.
         last_error:        { type: [string, "null"] }
 
     ProfileRequest:

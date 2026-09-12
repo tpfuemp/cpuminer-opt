@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
- * Prometheus text exposition for GET /metrics — contract: docs/api-rest.md
+ * Prometheus text exposition for GET /metrics -- contract: docs/api-rest.md
  * section 11.
  *
  * Renderer only: no miner state, no calls. The caller fills a POD struct from
@@ -60,8 +60,11 @@ typedef struct {
 	bool mining_active;
 	double uptime_s;
 	double hashrate_hs;
-	double net_difficulty;
-	double pool_difficulty;
+	/* A miner with no chain and a miner whose pool has not set a difficulty yet
+	 * both have nothing to report here, and 0 is a difficulty no chain has. The
+	 * flag omits the series instead, which is what section 11 asks for. */
+	bool has_net_difficulty;  double net_difficulty;
+	bool has_pool_difficulty; double pool_difficulty;
 
 	/* Process-lifetime monotonic: the miner's own counters are reset by some
 	 * paths, and a decrease mid-window corrupts rate(). */
@@ -74,7 +77,7 @@ typedef struct {
 	int npools;
 } api_metrics_input;
 
-/* Bytes written, or 0 when buf was too small — never a truncated exposition,
+/* Bytes written, or 0 when buf was too small -- never a truncated exposition,
  * which a scraper would parse as a half-missing family. */
 size_t api_metrics_render(const api_metrics_input *in, char *buf, size_t buflen);
 

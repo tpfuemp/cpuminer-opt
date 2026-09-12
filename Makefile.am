@@ -410,6 +410,8 @@ cpuminer_SOURCES = \
   algo/lyra2/sponge.c \
   algo/lyra2/sponge-2way.c \
   algo/lyra2/lyra2-hash-2way.c \
+  algo/lyra2/lyra2-2way-avx2.c \
+  algo/lyra2/lyra2-4way-avx512.c \
   algo/lyra2/lyra2-gate.c \
   algo/lyra2/lyra2rev2.c \
   algo/lyra2/lyra2rev2-4way.c \

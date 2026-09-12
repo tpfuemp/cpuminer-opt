@@ -653,8 +653,14 @@ void api_collect_metrics( api_metrics_input *in )
                      && api_ctl_get_state() == CTL_RUNNING;
    in->uptime_s        = s.uptime;
    in->hashrate_hs     = s.hashrate;
-   in->net_difficulty  = s.diff_net;
-   in->pool_difficulty = s.diff_pool;
+   /* A benchmark run has no chain and a fresh connection has no pool
+    * difficulty; 0 is a difficulty no chain has, so the series is omitted
+    * rather than fabricated. The input is memset above: without these two
+    * flags this miner would publish neither. */
+   in->has_net_difficulty  = s.diff_net > 0.;
+   in->net_difficulty      = s.diff_net;
+   in->has_pool_difficulty = s.diff_pool > 0.;
+   in->pool_difficulty     = s.diff_pool;
 
    /* Carried totals, not s.* : these are Prometheus counters, and a control
     * algo switch resets the live counters underneath them. api_collect_summary

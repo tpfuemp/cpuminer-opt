@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /*
- * Prometheus text exposition — see api_metrics.h and docs/api-rest.md section 11.
+ * Prometheus text exposition -- see api_metrics.h and docs/api-rest.md section 11.
  */
 
 #include <stdarg.h>
@@ -41,7 +41,7 @@ static void emit(sink *s, const char *fmt, ...)
 
 /* A label value may not contain a backslash, quote or newline. An unescaped one
  * does not give a wrong value, it makes the scraper reject the whole
- * exposition — every metric from this rig, gone. */
+ * exposition -- every metric from this rig, gone. */
 static const char *esc(const char *in, char *out, size_t outlen)
 {
 	size_t j = 0;
@@ -120,13 +120,20 @@ size_t api_metrics_render(const api_metrics_input *in, char *buf, size_t buflen)
 	emit(&s, "miner_hashrate_hashes_per_second{algo=\"%s\"} %s\n",
 		esc(in->algo, l1, sizeof(l1)), v);
 
+	/* Header-only where the miner has no value to report: a benchmark run has no
+	 * chain, and a fresh connection has no pool difficulty until the first job.
+	 * 0 is a difficulty no chain has, so it would poison every average. */
 	family(&s, "miner_network_difficulty", "gauge", "Network difficulty.");
-	num(v, sizeof(v), in->net_difficulty);
-	emit(&s, "miner_network_difficulty %s\n", v);
+	if (in->has_net_difficulty) {
+		num(v, sizeof(v), in->net_difficulty);
+		emit(&s, "miner_network_difficulty %s\n", v);
+	}
 
 	family(&s, "miner_pool_difficulty", "gauge", "Share difficulty set by the pool.");
-	num(v, sizeof(v), in->pool_difficulty);
-	emit(&s, "miner_pool_difficulty %s\n", v);
+	if (in->has_pool_difficulty) {
+		num(v, sizeof(v), in->pool_difficulty);
+		emit(&s, "miner_pool_difficulty %s\n", v);
+	}
 
 	family(&s, "miner_shares_total", "counter",
 		"Shares by outcome since process start; monotonic by construction.");

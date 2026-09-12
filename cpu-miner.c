@@ -2378,15 +2378,13 @@ void set_work_data_big_endian( struct work *work )
         be32enc( work->data + i, work->data[i] );
 }
 
-/* Test instrument for V-05: cap the per-thread nonce span so extranonce2
- * ROLLOVER can be exercised in minutes instead of hours.
+/* Test instrument: cap the per-thread nonce span so extranonce2 ROLLOVER can
+ * be exercised in minutes instead of hours.
  *
- * Rollover is otherwise unreachable in any realistic test session. xnonce2 is
+ * Rollover is otherwise unreachable in a realistic test session. xnonce2 is
  * zeroed on every mining.notify (util.c:2474) and only advances when
- * stratum_gen_work() runs a SECOND time within one job, which requires a thread
- * to exhaust 0xffffffff/threads nonces -- hours per thread. An allium pool
- * session of 111 submits accordingly saw xnonce2 stay 00000000 throughout, so
- * the resubmit-with-a-new-coinbase path has never been exercised.
+ * stratum_gen_work() runs a SECOND time within one job, which requires a
+ * thread to exhaust 0xffffffff/threads nonces -- hours per thread.
  *
  * Off unless CPUMINER_NONCE_SPAN is set, so normal mining is untouched. Reads
  * the environment lazily; two threads racing the first read is harmless (they

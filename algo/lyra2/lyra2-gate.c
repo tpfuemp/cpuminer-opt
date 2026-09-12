@@ -179,28 +179,6 @@ bool register_lyra2h_algo( algo_gate_t* gate )
   return true;
 };
 
-/////////////////////////////////
-/*
-bool register_allium_algo( algo_gate_t* gate )
-{
-#if defined (ALLIUM_16WAY)
-  gate->scanhash  = (void*)&scanhash_allium_16way;
-#elif defined (ALLIUM_8WAY)
-  gate->scanhash  = (void*)&scanhash_allium_8way;
-#else
-  gate->miner_thread_free = (void*)&lyra2_thread_free;
-  gate->miner_thread_init = (void*)&init_allium_ctx;
-  gate->scanhash  = (void*)&scanhash_allium;
-  gate->hash      = (void*)&allium_hash;
-#endif
-  gate->optimizations = SSE2_OPT | AES_OPT | AVX2_OPT | AVX512_OPT
-	                   | VAES_OPT | NEON_OPT;
-  opt_target_factor = 256.0;
-  return true;
-};
-*/
-/////////////////////////////////////////
-
 bool phi2_has_roots = false;
 bool phi2_use_roots = false;
 

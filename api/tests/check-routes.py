@@ -6,7 +6,7 @@ catches the drift that is otherwise invisible until a client hits a 404: a route
 implemented but undocumented, or documented but unrouted, or routed with the
 wrong privilege.
 
-It does NOT check response schemas — that needs a running miner. This is the
+It does NOT check response schemas -- that needs a running miner. This is the
 static half; the schema check is done against a live instance.
 
     python api/tests/check-routes.py
@@ -18,9 +18,14 @@ import sys
 DOC = "docs/api-rest.md"
 SRC = "api_routes.c"        # .cpp in the sibling; the checker is otherwise shared
 
-# The contract's endpoint table. A row may name several paths separated by ' · ',
-# and the availability columns are per miner kind.
+# The contract's endpoint table. A row may name several paths in one cell, and the
+# fourth column is the capability that carries them -- not a per-kind availability
+# flag: two implementations now report kind "gpu" and do not serve the same routes.
+#
+# The separator is a comma; it was a middot (U+00B7) until the document became
+# ASCII-only, and both are accepted because a path can contain neither.
 ROW = re.compile(r"^\|\s*(GET|POST)\s*\|\s*(.+?)\s*\|\s*(read|write|control)\s*\|", re.M)
+SEP = re.compile("[" + chr(0xB7) + ",]")
 
 # { API_M_GET, "/api/v1/summary", API_PRIV_READ, true, h_summary },
 ENTRY = re.compile(
@@ -34,7 +39,7 @@ def doc_routes():
     out = {}
     for verb, paths, priv in ROW.findall(text):
         base = None
-        for p in paths.split("·"):
+        for p in SEP.split(paths):
             p = p.strip().strip("`").strip()
             if not p.startswith("/"):
                 continue

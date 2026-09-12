@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
- * HTTP transport for the REST API — see api_http.h.
+ * HTTP transport for the REST API -- see api_http.h.
  *
- * SHARED FILE — keep byte-identical with the sibling miner.
+ * SHARED FILE -- keep byte-identical with the sibling miner.
  */
 
 #include <stdio.h>
@@ -379,7 +379,7 @@ static int send_error(int sock, int status, const char *msg, const api_http_conf
 {
 	char *body = api_http_error_body(cfg, status, msg);
 	if (!body) {
-		/* json_dumps failed (OOM) — still answer, with a static body. */
+		/* json_dumps failed (OOM) -- still answer, with a static body. */
 		static const char fallback[] =
 			"{\"error\":{\"code\":\"internal_error\",\"message\":\"out of memory\",\"status\":500}}";
 		api_http_send(sock, 500, NULL, fallback, sizeof(fallback) - 1, cfg);

@@ -1,15 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
- * Minimal HTTP/1.1 server subset for the REST API — transport only.
+ * Minimal HTTP/1.1 server subset for the REST API -- transport only.
  *
- * SHARED FILE — keep byte-identical with the sibling miner. No miner symbols:
+ * SHARED FILE -- keep byte-identical with the sibling miner. No miner symbols:
  * it takes a socket, a route table and an opaque context. The contract it
  * serves is docs/api-rest.md. The route table is data, so a route a miner
  * cannot serve is registered available = false and answered 501 here rather
  * than with an #ifdef in the handler.
  *
  * Not supported, deliberately: keep-alive, pipelining, chunked request bodies,
- * compression. Every response is Connection: close — the API is one thread on
+ * compression. Every response is Connection: close -- the API is one thread on
  * a blocking accept(), so a persistent connection would block every client.
  *
  * api_http_parse() is a pure function over a buffer, so it is unit-testable
