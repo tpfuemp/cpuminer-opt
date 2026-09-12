@@ -2378,6 +2378,47 @@ void set_work_data_big_endian( struct work *work )
         be32enc( work->data + i, work->data[i] );
 }
 
+/* Test instrument for V-05: cap the per-thread nonce span so extranonce2
+ * ROLLOVER can be exercised in minutes instead of hours.
+ *
+ * Rollover is otherwise unreachable in any realistic test session. xnonce2 is
+ * zeroed on every mining.notify (util.c:2474) and only advances when
+ * stratum_gen_work() runs a SECOND time within one job, which requires a thread
+ * to exhaust 0xffffffff/threads nonces -- hours per thread. An allium pool
+ * session of 111 submits accordingly saw xnonce2 stay 00000000 throughout, so
+ * the resubmit-with-a-new-coinbase path has never been exercised.
+ *
+ * Off unless CPUMINER_NONCE_SPAN is set, so normal mining is untouched. Reads
+ * the environment lazily; two threads racing the first read is harmless (they
+ * compute the same value and may log twice).
+ */
+static uint32_t nonce_span_cap( void )
+{
+   static bool     read_env = false;
+   static uint32_t span     = 0;
+
+   if ( !read_env )
+   {
+      const char *e = getenv( "CPUMINER_NONCE_SPAN" );
+      span     = e ? (uint32_t)strtoul( e, NULL, 0 ) : 0;
+      read_env = true;
+      if ( span )
+         applog( LOG_WARNING,
+                 "TEST MODE: per-thread nonce span capped at %u "
+                 "(extranonce2 rollover test)", span );
+   }
+   return span;
+}
+
+/* Shrink [*nonceptr, *end_nonce_ptr) to at most the cap, if one is set. */
+static inline void apply_nonce_span_cap( const uint32_t *nonceptr,
+                                         uint32_t *end_nonce_ptr )
+{
+   const uint32_t span = nonce_span_cap();
+   if ( span && ( *end_nonce_ptr - *nonceptr ) > span )
+      *end_nonce_ptr = *nonceptr + span;
+}
+
 void std_get_new_work( struct work* work, struct work* g_work, int thr_id,
                      uint32_t *end_nonce_ptr )
 {
@@ -2396,6 +2437,7 @@ void std_get_new_work( struct work* work, struct work* g_work, int thr_id,
      work_copy( work, g_work );
      *nonceptr = 0xffffffffU / opt_n_threads * thr_id;
      *end_nonce_ptr = ( 0xffffffffU / opt_n_threads ) * (thr_id+1) - 0x20;
+     apply_nonce_span_cap( nonceptr, end_nonce_ptr );
    }
    else
        ++(*nonceptr);
