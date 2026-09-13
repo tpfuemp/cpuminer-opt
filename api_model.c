@@ -247,8 +247,11 @@ void api_collect_system( struct api_system_snapshot *s )
    s->cpu_fan_pct   = -1;
 }
 
-/* Instruction sets this build can use, collected space-separated and split
- * into docs/openapi.yaml's Device.cpu.features array at JSON build time. */
+/* Instruction sets THIS CPU supports: every entry below is a runtime CPUID or
+ * HWCAP probe, not a compile-time flag. A build that lacks a feature the CPU
+ * has still lists it here; cpu_capability() is where that mismatch is
+ * reported. Collected space-separated and split into the JSON features array
+ * at build time. */
 static void collect_features( char *out, size_t len )
 {
    const struct { bool have; const char *name; } f[] = {
@@ -256,6 +259,7 @@ static void collect_features( char *out, size_t len )
       { has_sse42(),     "SSE4.2"    }, { has_avx(),       "AVX"       },
       { has_avx2(),      "AVX2"      }, { has_avx512(),    "AVX512"    },
       { has_vaes(),      "VAES"      }, { has_aes(),       "AES"       },
+      { has_gfni(),      "GFNI"      },
       { has_sha256(),    "SHA256"    }, { has_sha512(),    "SHA512"    },
       { has_neon(),      "NEON"      }, { has_sve(),       "SVE"       },
    };

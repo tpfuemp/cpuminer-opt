@@ -3594,6 +3594,7 @@ static bool cpu_capability( bool display_only )
      bool sw_has_apx       = false;
      bool sw_has_aes       = false;        // x86_64 or AArch64
      bool sw_has_vaes      = false;        // x86_64
+     bool sw_has_gfni      = false;        // x86_64
      bool sw_has_sha256    = false;        // x86_64 or AArch64
      bool sw_has_sha512    = false;
 
@@ -3647,6 +3648,9 @@ static bool cpu_capability( bool display_only )
      #endif
      #ifdef __VAES__
          sw_has_vaes = true;
+     #endif
+     #ifdef __GFNI__
+         sw_has_gfni = true;
      #endif
      #if defined(__SHA__) || defined(__ARM_FEATURE_SHA2)
          sw_has_sha256 = true;
@@ -3732,6 +3736,7 @@ static bool cpu_capability( bool display_only )
      }     
      if        ( has_vaes()   )    printf( " VAES"   );
      else if   ( has_aes()    )    printf( "  AES"   );
+     if        ( has_gfni()   )    printf( " GFNI"   );
      if        ( has_sha512() )    printf( " SHA512" );
      else if   ( has_sha256() )    printf( " SHA256" );
 
@@ -3760,11 +3765,30 @@ static bool cpu_capability( bool display_only )
      }
      if         ( sw_has_vaes    )   printf( " VAES"   );
      else if    ( sw_has_aes     )   printf( "  AES"   );
+     if         ( sw_has_gfni    )   printf( " GFNI"   );
      if         ( sw_has_sha512  )   printf( " SHA512" );
      else if    ( sw_has_sha256  )   printf( " SHA256" );
 
      printf("\n");
-     
+
+     /* A feature the CPU has but the build does not is a silent slowdown, not an
+      * error: every consumer falls back to a software path that still hashes
+      * correctly. AES is called out because -march does not imply it -- westmere
+      * through broadwell, core-avx2 and corei7-avx all leave __AES__ undefined.
+      * GFNI is the same trap one tier up: skylake-avx512 lacks it while
+      * icelake-client has it, and nothing else on screen tells the two apart. */
+     if      ( has_aes() && !sw_has_aes )
+        applog( LOG_WARNING, "CPU supports AES but this build does not use it; "
+                             "rebuild with -maes, or run a release binary that "
+                             "matches this CPU" );
+     else if ( has_vaes() && !sw_has_vaes )
+        applog( LOG_WARNING, "CPU supports VAES but this build does not use it; "
+                             "a VAES binary is faster for AES-based algos" );
+     else if ( has_gfni() && !sw_has_gfni )
+        applog( LOG_WARNING, "CPU supports GFNI but this build does not use it; "
+                             "groestl is ~1.5x faster with it, use the "
+                             "avx512-sha-vaes binary" );
+
      return true;
 }
 

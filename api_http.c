@@ -483,9 +483,10 @@ int api_http_serve_prefixed(int sock, const char *prefix, size_t prefixlen,
 	 * that supplies its own keeps it: /health answers 503 carrying
 	 * {"status":"degraded","reasons":[...]}, which this used to discard.
 	 *
-	 * Safe because /health is the only handler that returns >= 400 with a body:
-	 * every other path leaves *out NULL, ctl_reply() included. Re-audit the route
-	 * table if that stops holding. */
+	 * So a handler returning >= 400 owns its reply: whatever it leaves in *out
+	 * is what the client sees and errmsg is spent, and leaving *out NULL is how
+	 * it asks for the envelope instead. Do not name the handlers that do this --
+	 * a census here goes stale the moment one of them gains a second. */
 	if (status >= 400 && !out)
 		return send_error(sock, status, errmsg[0] ? errmsg : NULL, cfg);
 

@@ -740,7 +740,9 @@ components:
       description: Body over 8 KiB.
       content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
     TooManyRequests:
-      description: Control mutation inside `--api-control-min-interval`.
+      description: |
+        Control mutation inside `--api-control-min-interval`. The error object carries
+        `retry_after_s`, the whole seconds to wait before retrying.
       content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
     NotImplemented:
       description: This miner cannot serve this route.
@@ -782,6 +784,12 @@ components:
                  conflict, payload_too_large, too_many_requests, not_implemented, internal_error]
         message: { type: string, description: Human-readable prose. Not stable. }
         status:  { type: integer }
+        retry_after_s:
+          type: integer
+          minimum: 1
+          description: |
+            Present only on 429, and never 0. Whole seconds to wait before retrying,
+            rounded up, so a client that waits this long is not throttled again.
 
     ErrorEnvelope:
       allOf:
@@ -907,6 +915,7 @@ components:
             kernel:        { type: [string, "null"], description: "Kernel variant the tuner selected; null until tuned." }
             batches_total: { type: [integer, "null"], description: Dispatches issued to this device since process start. }
             batches_late:  { type: [integer, "null"], description: Dispatches whose result arrived after the job had moved on. }
+            shared_table_bytes: { type: [integer, "null"], description: "Epoch-scoped table (a DAG or similar) held on this device; null when none. Survives a pause." }
         cpu:
           type: object
           properties:

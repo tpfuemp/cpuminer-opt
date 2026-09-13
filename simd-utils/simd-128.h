@@ -165,6 +165,13 @@
 
 #define v128_aesenclast                _mm_aesenclast_si128
 #define v128_aesenclast_nokey(v)       _mm_aesenclast_si128( v, v128_zero )
+
+// Key-first last round: SubBytes( ShiftRows( v ^ k ) ). AESENCLAST XORs its key
+// AFTER the S-box, so x86 needs an explicit XOR and this is two instructions;
+// ARM's AESE XORs before and gets it in one. Callers folding a constant into
+// the key therefore only win on ARM -- see algo/groestl/aes_ni.
+#define v128_xoraesenclast( v, k ) \
+   _mm_aesenclast_si128( _mm_xor_si128( v, k ), v128_zero )
 #define v128_aesdec                    _mm_aesdec_si128
 #define v128_aesdec_nokey(v)           _mm_aesdec_si128( v, v128_zero )
 #define v128_aesdeclast                _mm_aesdeclast_si128

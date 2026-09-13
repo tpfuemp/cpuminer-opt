@@ -231,6 +231,12 @@
 #define v128_aesenclast_nokey( v ) \
    vaeseq_u8( v, v128_zero )
 
+// Key-first last round. AESE already XORs its key BEFORE SubBytes, so this is
+// the bare instruction -- which is what lets a caller fold an AddRoundConstant
+// into it for free. x86 has no equivalent: AESENCLAST XORs after the S-box.
+#define v128_xoraesenclast( v, k ) \
+   vaeseq_u8( v, k )
+
 #define v128_aesdec( v, k ) \
     v128_xor( k, vaesimcq_u8( vaesdq_u8( v, v128_zero ) ) )
 

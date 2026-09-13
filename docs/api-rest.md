@@ -149,6 +149,12 @@ Status codes, and the stable `error.code` that goes with each:
 
 Clients branch on `code`, never on the prose in `message`.
 
+**A `429` carries `retry_after_s` in the error object** -- whole seconds, rounded **up**, so a client
+that waits that long and retries is not throttled again. It is the only status that carries it, and
+on a `429` it is always `>= 1`: never `0` and never `null`, because a refusal that says "come back in
+no time" has told the caller nothing. Without it the delay would be readable only out of `message`,
+which the rule above forbids.
+
 Limits: request line <= 2 KiB, headers <= 8 KiB and <= 32 lines, body <= 8 KiB, socket timeout 5 s.
 Responses are always `Connection: close` -- one request per connection, no keep-alive, no chunked
 bodies, no compression.
@@ -307,13 +313,18 @@ reads no vendor telemetry -- and **a `vulkan` sub-object beside it**:
 ```json
   "vulkan": { "driver": "595.95", "api_version": "1.4.329", "backend": "vulkan",
               "int64": true, "tuned": true, "workgroup": 1024, "queue_depth": 3,
-              "kernel": "spec-sub", "batches_total": 1774, "batches_late": 56 }
+              "kernel": "spec-sub", "batches_total": 1774, "batches_late": 56,
+              "shared_table_bytes": 1123123200 }
 ```
 
 `workgroup`, `queue_depth` and `kernel` are the tuning settled for that device and are `null` until
 a tuning pass has run; they are per-device measurements, not properties of the algorithm.
 `batches_total` and `batches_late` are process-lifetime counters, a late batch being one whose
-result arrived after its job had moved on. The sub-object is additive, so a client that does not
+result arrived after its job had moved on. `shared_table_bytes` is the epoch-scoped table the
+device is holding right now -- a DAG or similar -- and is `null` when it holds none, never `0`: a
+table of no size is not a thing this reports. It is what makes section 7's retained-across-`pause`
+allowance observable rather than inferred, so a manager weighing `pause` against `stop` can read
+what a `pause` would keep. The sub-object is additive, so a client that does not
 know it ignores it -- section 1's versioning rule.
 
 This is the **expensive** route -- it queries the vendor telemetry libraries. Poll `/summary` or
@@ -438,10 +449,13 @@ Four states. Every mutation passes through `switching` and lands in exactly one 
   similar shared table -- rather than free it and rebuild it on resume. The guarantee `pause` makes
   is that no work continues and no share is produced, not that every allocation is returned; the
   observable consequences are a fast resume and memory still accounted to the process. A manager
-  that needs the memory back issues `stop`, or `quit`.
+  that needs the memory back issues `stop`, or `quit`. Where an implementation retains such a
+  table it reports the amount rather than leaving it to be inferred from the process: on the
+  Vulkan miner that is `devices[].vulkan.shared_table_bytes`, `null` on a device holding nothing.
 - Mutations are serialised. A second one arriving during `switching` gets `409`, never a queue.
 - Mutations are throttled to one per `--api-control-min-interval` (default 15 s); a faster call gets
-  `429`. `start`/`pause`/`stop` are **not** throttled, only re-targeting is.
+  `429`, whose error object carries `retry_after_s` -- how long is left, so the caller waits that
+  long rather than guessing. `start`/`pause`/`stop` are **not** throttled, only re-targeting is.
 
 Internally a mutation parks every mining thread first and only then changes anything, so an algo
 switch can never race a running kernel. If a thread does not park within
@@ -628,8 +642,10 @@ One alphabetical table so a name cannot mean two things in two places. `n` = nul
 | `ready_for_switch` | bool | -- | | anti-flap interval has expired |
 | `reasons` | array | -- | yes | why health is `degraded` |
 | `rejected` | int | -- | yes | rejected shares |
+| `retry_after_s` | int | s | | **error scope, `429` only**: whole seconds to wait before retrying, rounded up; always `>= 1` |
 | `serial` | string | -- | yes | device serial |
 | `session_s` | int | s | yes | **pool scope**: seconds since the current pool connection was established, reset by a reconnect. `null` when this pool is not connected. Read `uptime_s` for the process |
+| `shared_table_bytes` | int | bytes | yes | epoch-scoped table (a DAG or similar) this device is holding; `null` when it holds none. Survives a `pause` -- section 7 |
 | `shares` | object | -- | | `{accepted,rejected,stale,solved[,accepted_per_min]}` |
 | `since_s` | int | s | | seconds in the current control state |
 | `sm` | int | -- | yes | CUDA compute capability x10 |
@@ -705,8 +721,6 @@ still branches on the capability list and on `kind`, never on a column heading.
 | Write gate, **remote** caller | requires `W:` in `--api-allow`, or a custom group whose command list names the command | requires `--api-remote` | requires `--api-remote` | on the CUDA miner the `R:`/`W:` distinction is enforced on **every** protocol on the port, not only on REST |
 | Write gate, **loopback** caller | same as a remote caller | same as a remote caller | same as a remote caller | **no implementation exempts loopback on this API.** The CUDA miner exempts it on its legacy binary protocol only |
 | `POST /pools/url` | write gate only | **write gate *and* `--api-control`** | write gate only | on the Vulkan miner a re-target runs under the same park barrier a control mutation uses, and with the control API off that barrier is compiled out to a constant. Serving it without the flag would mean building a second, unparked re-target path; refusing is the safer of the two, and a `pool`-only `/control/profile` is the same operation behind the gate that documents it |
-| `POST /control/profile` carrying an `algo` that is not the running one | applies | **`501`** | applies | that miner cannot change algorithm without a restart. A statement about the current build, not a permanent property of the implementation |
-| `POST /control/profile` carrying a `pool` **and** a run-state change that really changes the state | applies atomically | **`501`** -- send them as two requests | applies atomically | section 7.4 promises no half-switched miner. That build applies the two one at a time, each spending an epoch, so it cannot promise atomicity across them and refuses rather than half-apply |
 
 Out of scope for v1 on all three miners, stated so it is not mistaken for an omission: no process
 restart or self-update, no overclock/fan/power control, no profitability logic inside the miner, no
@@ -826,7 +840,7 @@ unavailable values are `null` instead of `0` or an empty string.
 | Revision | Change |
 |---|---|
 | 1.0 (unreleased) | Initial contract: read surface, write surface, control API, metrics. |
-| 1.0 (unreleased) | Reconciled the two copies. New section 7.5 (a switch is refused with `409` when the target's workspace does not fit, `cpu` only). `features` is an array, not a delimited string. Section 10 corrected against both implementations: `/history`, `threads[].accepted`/`.rejected` and `summary.shares.stale` are served on `cpu`; `/scanlog` and `/meminfo` are permanently `501` there. |
+| 1.0 (unreleased) | Reconciled the two copies. New section 7.5 (a switch is refused with `409` when the target's workspace does not fit, `cpu` only). `features` is an array, not a delimited string. Section 10 corrected against both implementations: `/history`, `threads[].accepted`/`.rejected` and `summary.shares.stale` are served on `cpu`; `/scanlog` and `/meminfo` are permanently `501` there. Section 10's two `/control/profile` rows dropped: the Vulkan miner now applies an `algo` change, and a pool together with a run-state change, in one barrier pass costing one epoch, so neither row has a difference left to record. |
 | 1.0 (unreleased) | Section 4: the token is matched exactly; the legacy WebSocket path is token-covered and a refused upgrade answers `401` rather than closing silently. Section 10: the write gate is split into remote and loopback rows, because the two miners differ on the local caller. |
 | 1.0 (unreleased) | **Correction.** Sections 4 and 10 claimed a `gpu` miner grants loopback callers full access regardless of the write flag. That is true only of its legacy binary protocol; on this API every caller needs the write flag, measured. |
 | 1.0 (unreleased) | Section 5 corrected: it claimed in one sentence that a routed `control.*` capability is listed and answers `403` without `--api-control`, and in the next that the capability list is derived from the `--api-control` gate. The first is what both miners do; the second is withdrawn. **A client must not infer that control is unavailable from `control.*` being listed, nor expect it to disappear when the gate is off.** |
@@ -834,3 +848,5 @@ unavailable values are `null` instead of `0` or an empty string.
 | 1.0 (unreleased) | **`uptime_s` split.** It meant *process uptime* at summary scope and *pool session length* at pool scope -- one name, two meanings, one nullability column, and the two contract files disagreed on whether the pool one could be `null`. The pool field is now **`session_s`** (nullable, resets on reconnect) and `uptime_s` means process uptime at every scope. **Both times are now queryable independently**, and a client reading `pools[].uptime_s` must move to `pools[].session_s`. |
 | 1.0 (unreleased) | **A third implementation joins, and it shares a `kind` with an existing one.** Section 1 lists three miners; two report `gpu` and do not serve the same routes. **Section 10 no longer states route availability** -- that moves to the capability list of section 5, which is derived from the route table and cannot go stale -- and what remains there is field-level, per implementation. A client that inferred the existence of a path from `miner.kind` must read section 5 instead; nothing about an existing miner's behaviour changed. New: `devices[].vulkan` (section 6.3), three metric families (section 11), and section 7.5's memory pre-check restated per implementation because the two `gpu` miners differ on it. Section 7.1 now allows an implementation to retain an epoch-scoped dataset across a `pause`. |
 | 1.0 (unreleased) | **Correction, section 11.** `miner_network_difficulty` and `miner_pool_difficulty` were published as `0` by every implementation when the miner had no value for them, contradicting this section's own *"absent rather than zero"* rule -- the shared renderer's input carried no way to say "unset" for these two. Both are now header-only until a value exists. A dashboard that read `0` as a real difficulty during a benchmark run, or in the seconds before a pool's first job, now sees no sample instead. |
+| 1.0 (unreleased) | **The retained dataset becomes observable.** Section 7.1's allowance for holding an epoch-scoped dataset across a `pause` could only be inferred from the process's own footprint: `devices[].gpu.mem_bytes` is the card's total, a constant of the hardware, and was never able to carry it. Sections 6.3 and 8 gain **`devices[].vulkan.shared_table_bytes`** -- the table that device is holding right now, `null` when it holds none and never `0`, because a table of no size is not a state this reports. A manager weighing `pause` against `stop` can now read what a `pause` would keep rather than deduce it. Additive, and inside the Vulkan-only sub-object, so no other implementation owes code for it. |
+| 1.0 (unreleased) | **The retry delay becomes a field.** Section 4 tells clients to branch on `code` and never on the prose in `message`, yet a `429`'s only statement of when to come back *was* that prose -- so the one thing a throttled manager needs was reachable only by the route this contract forbids. The error object gains **`retry_after_s`**, on `429` and no other status: whole seconds, rounded **up**, always `>= 1`, so a caller that waits it out is not refused a second time. `ready_for_switch` (section 7.2) answers *whether* before a call; this answers *when* after one, without a second round trip. Unlike the row above, this is not implementation-local -- every implementation that throttles owes the field. |

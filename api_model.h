@@ -134,7 +134,7 @@ struct api_device_snapshot
    uint32_t cpu_clock_khz;
    int      cpu_fan_pct;
    double   hashrate;            /* H/s, device total */
-   char     features[256];       /* instruction sets this build can use */
+   char     features[256];       /* instruction sets this CPU supports */
 };
 
 /* Uptime origin. The model owns it rather than reading api.c's file-local
