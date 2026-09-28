@@ -7,23 +7,9 @@
 /*
  * yespower / yescrypt known-answer tests.
  *
- * Vectors 1-14 are upstream's own published ones, from building upstream
- * unmodified. The rest are ours, because upstream publishes none for those
- * parameters: minotaurx is anchored on a real Pulsar block, and the coin
- * variants (advc, ltncg, mgpc, sugar, tide, urx) are digests both of this
- * tree's implementations agree on, yespower() and yespower_ref(). Agreement
- * pins the code against drift and mis-built binaries; it does not prove a
- * tuple matches its coin.
- *
- * Why this matters here: every registered variant shares ONE source file
- * compiled TWICE (`_YESPOWER_OPT_C_PASS_` 1 = v0.5, 2 = v1.0), across four
- * ISA paths, and a build exercises one ISA path. A miscompiled or
- * mis-specialised path produces a well-formed digest that a pool silently
- * rejects. The vectors marked REGISTERED below pin the exact parameters this
- * miner ships.
- *
- * NOTE: vector 1 (BSTY) personalizes with the *input itself*, all 80 bytes, which
- * is why it carries `pers_is_src` rather than a string.
+ * Vectors 1-14 are upstream's published ones. minotaurx is taken from a
+ * Pulsar block; the coin variants are digests yespower() and yespower_ref()
+ * agree on. REGISTERED marks the parameters this miner ships.
  */
 
 typedef struct
@@ -35,15 +21,10 @@ typedef struct
    const char           *pers;        /* NULL = no personalization */
    int                   pers_is_src; /* 1 = personalize with the 80-byte input */
    uint8_t               digest[32];
-   /* 1 = yespower-ref.c legitimately disagrees with the shipping path here, so
-    * a differential must not treat it as a failure. Only the v0.5 pers == NULL
-    * case: the reference gates the trailing HMAC on `pers`, the optimized path
-    * personalizes with the header, and the pool says the optimized path is
-    * what the chain computes. */
+   /* 1 = yespower-ref.c differs here by design (v0.5 with pers == NULL:
+    * the optimized path personalizes with the header). */
    int                   ref_differs;
-   /* Optional per-vector input. NULL means "use the shared 80-byte
-    * yespower_kat_input()". minotaurx is the only consumer that calls yespower
-    * with srclen != 80, so it needs its own. */
+   /* Optional input; NULL = the shared 80-byte yespower_kat_input(). */
    const uint8_t        *src;
    uint32_t              srclen;
 } yespower_kat_t;
@@ -54,11 +35,7 @@ static inline void yespower_kat_input( uint8_t src[80] )
    for ( int i = 0; i < 80; i++ ) src[i] = (uint8_t)( i * 3 );
 }
 
-/* minotaurx's node-21 input: the 64-byte chain state for Pulsar mainnet
- * block 7920000. Node 21 is terminal, so yespower's result is that block's
- * published digest -- which makes the pair self-validating, and it was
- * cross-checked against yespower_ref(). Upstream publishes no vector for
- * these parameters. */
+/* minotaurx's final-node input for Pulsar mainnet block 7920000. */
 static const uint8_t yespower_kat_minotaurx_in[64] =
 {
    0x96, 0x76, 0x7d, 0xec, 0xb8, 0x25, 0x3e, 0xae, 0xed, 0xa2, 0xb9, 0x8a,
@@ -107,15 +84,8 @@ static const yespower_kat_t yespower_kats[] =
    { 0x2a,0x79,0xe5,0x3d, 0x1b,0xe6,0x66,0x9b, 0xc5,0x56,0xcc,0xc4, 0x17,0xbc,0xe3,0xd2,
      0x2a,0x74,0xa2,0x32, 0xf5,0x6b,0x8e,0x1d, 0x39,0xb4,0x57,0x92, 0x67,0x5d,0xe1,0x08 } },
 
- /* NOTE: upstream's (0.5, 2048, 8, NULL) vector -- digest 5ecbd8e8... -- is
-  * DELIBERATELY ABSENT: it does not describe this miner's `yescrypt`.
-  *
-  * With pers == NULL the v0.5 tail still HMACs over the 80-byte header, so
-  * `-a yescrypt` computes *header-personalized* yescrypt -- upstream's BSTY
-  * convention, i.e. vector 1 above, whose digest the entry below asserts.
-  * Matching upstream's unpersonalized vector instead makes a live pool reject
-  * every share. A published vector describes the parameters it was generated
-  * with, not the algorithm an --algo name selects. */
+ /* Upstream's (0.5, 2048, 8, NULL) vector is omitted on purpose: with
+  * pers == NULL this miner's yescrypt personalizes with the header (BSTY). */
  { "yescrypt (0.5, 2048, 8, NULL == BSTY pers)  REGISTERED",
    YESPOWER_0_5, 2048, 8, NULL, 0,
    { 0x5e,0xa2,0xb2,0x95, 0x6a,0x9e,0xac,0xe3, 0x0a,0x32,0x37,0xff, 0x1d,0x44,0x1e,0xde,
@@ -159,8 +129,7 @@ static const yespower_kat_t yespower_kats[] =
        0xd4, 0xe7, 0x2b, 0xf5, 0xfc, 0x05, 0x00, 0x00 }, 0,
      yespower_kat_minotaurx_in, 64 },
 
-   /* Coin variants. perslen is not stored: yespower_kat_hash() takes
-    * strlen(pers), so string and length cannot disagree. */
+   /* Coin variants. perslen is strlen(pers). */
 
    { "yespoweradvc (1.0, 2048, 32, \"Let the quest begin\")  REGISTERED",
      YESPOWER_1_0, 2048, 32, "Let the quest begin", 0,
@@ -185,7 +154,6 @@ static const yespower_kat_t yespower_kats[] =
        0x67, 0xbe, 0xb9, 0x72, 0x2b, 0x36, 0xa7, 0x34, 0xab, 0x7c, 0x80, 0xf1,
        0x6e, 0xb0, 0x05, 0xb5, 0x4e, 0xeb, 0x03, 0x4c }, 0, NULL, 0 },
 
-   /* r = 8, not 32 -- the only variant here that is not 2048/32. */
    { "yespowertide (1.0, 2048, 8, NULL)  REGISTERED",
      YESPOWER_1_0, 2048, 8, NULL, 0,
      {
@@ -206,6 +174,13 @@ static const yespower_kat_t yespower_kats[] =
        0xdf, 0x3c, 0xf2, 0x97, 0x78, 0x6a, 0x4e, 0xb8, 0x48, 0x74, 0xb5, 0x3d,
        0x10, 0x34, 0xf3, 0xb4, 0xa4, 0xd2, 0x66, 0x0a, 0x96, 0xeb, 0x51, 0xba,
        0xcd, 0x90, 0x75, 0x40, 0xa9, 0x4a, 0x4f, 0x5f }, 0, NULL, 0 },
+
+   { "yespowersmt (1.0, 256, 8, NULL)  REGISTERED",
+     YESPOWER_1_0, 256, 8, NULL, 0,
+     {
+       0xbe, 0xf1, 0x0f, 0x81, 0x83, 0x2f, 0x2a, 0x10, 0xfa, 0x90, 0x5d, 0x7b,
+       0xf0, 0xb7, 0x83, 0x03, 0x90, 0x3e, 0x4d, 0xdf, 0x35, 0xd2, 0xdb, 0x82,
+       0x90, 0x9e, 0x6c, 0xff, 0x0f, 0x61, 0x9c, 0x8b }, 0, NULL, 0 },
 
 };
 

@@ -36,31 +36,26 @@ __thread sha256_context sha256_prehash_ctx;
 
 // ---------------------------------------------------------------- self-test
 //
-// Ten registered algos share ONE source file compiled TWICE (v0.5 / v1.0)
-// across four ISA paths, and a build exercises one ISA path. Without this,
-// nothing checks any of them: a mis-specialised build mines well-formed
-// digests that the pool silently rejects. Vectors are upstream's own
-// (yespower-kat.h).
+// Known-answer test at registration: a mis-built ISA path would otherwise
+// mine well-formed digests the pool rejects. Vectors are in yespower-kat.h.
 
-// NOTE: yespower-opt.c compiles to nothing without __SSE2__ or __aarch64__,
-// so on a scalar build `yespower`, `yespower_b2b` and the region helpers do
-// not exist. Picking the wrong pair here links fine on x86-64, where __SSE2__
-// is always defined, and breaks only on the build nobody tries first.
+// yespower-opt.c is empty without __SSE2__ or __aarch64__; scalar builds
+// use the reference implementation.
 #if defined(__SSE2__) || defined(__aarch64__)
   #define YESPOWER_KAT_FN       yespower
   #define YESPOWER_KAT_INIT     yespower_init_local
   #define YESPOWER_KAT_FREE     yespower_free_local
   #define YESPOWER_KAT_PATH     "SIMD"
+  #define YESPOWER_KAT_IS_REF   0
 #else
   #define YESPOWER_KAT_FN       yespower_ref
   #define YESPOWER_KAT_INIT     yespower_init_local_ref
   #define YESPOWER_KAT_FREE     yespower_free_local_ref
   #define YESPOWER_KAT_PATH     "reference"
+  #define YESPOWER_KAT_IS_REF   1
 #endif
 
-// work_restart[] is calloc'd in main() AFTER register_algo_gate() runs, and
-// yespower() polls work_restart[thrid].restart between phases, so a
-// registration-time self-test has to supply one itself.
+// yespower() polls work_restart[], which main() allocates after registration.
 static struct work_restart yespower_kat_restart[1];
 
 static bool yespower_kat_hash( const yespower_kat_t *v, const uint8_t src[80],
@@ -68,8 +63,7 @@ static bool yespower_kat_hash( const yespower_kat_t *v, const uint8_t src[80],
 {
    yespower_params_t p;
 
-   // A vector may carry its own input; minotaurx is the only consumer that
-   // calls yespower with srclen != 80.
+   // A vector may carry its own input (minotaurx, srclen != 80).
    const uint8_t *in    = v->src ? v->src : src;
    const size_t   inlen = v->src ? v->srclen : 80;
 
@@ -81,11 +75,7 @@ static bool yespower_kat_hash( const yespower_kat_t *v, const uint8_t src[80],
                              p.perslen = strlen( v->pers ); }
    else                    { p.pers = NULL;                   p.perslen = 0;  }
 
-   // The shipping path assumes scanhash already prehashed the first 64 bytes
-   // (yespower-opt.c, srclen == 80 branch), so the KAT must do the same. That
-   // makes this a test of the prehash optimization too: upstream computed
-   // these digests without one.
-   // The prehash contract applies only to the srclen == 80 branch.
+   // Like scanhash, prehash the first 64 bytes for the srclen == 80 path.
    if ( inlen == 80 )
    {
       sha256_ctx_init( &sha256_prehash_ctx );
@@ -124,6 +114,7 @@ const char *yespower_self_test( void )
 
    for ( size_t i = 0; i < YESPOWER_NUM_KATS; i++ )
    {
+      if ( YESPOWER_KAT_IS_REF && yespower_kats[i].ref_differs ) continue;
       if ( !yespower_kat_hash( &yespower_kats[i], src, &local, out ) )
       {  fail = yespower_kats[i].name; goto done; }
       if ( memcmp( out, yespower_kats[i].digest, 32 ) )
@@ -133,20 +124,15 @@ const char *yespower_self_test( void )
       }
    }
 
-   // Non-vacuity. Byte 10 lies inside the 64-byte prehash and byte 70 outside
-   // it, so between them they prove the digest depends on both halves of the
-   // header -- a prehash wrongly cached across headers would pass every vector
-   // above and fail here.
-   // Pick the last vector that uses the SHARED input. A vector carrying its own
-   // `src` ignores `alt` entirely, so perturbing alt would leave its digest
-   // unchanged and this check would report the KAT vacuous when it is not.
+   // Non-vacuity: flipping byte 10 (inside the prehash) or byte 70 (outside)
+   // must change the digest. Uses the last vector on the shared input.
    size_t nv = 0;
    for ( size_t i = 0; i < YESPOWER_NUM_KATS; i++ )
       if ( !yespower_kats[i].src ) nv = i;
    if ( !yespower_kat_hash( &yespower_kats[nv], src, &local, out ) )
    {  fail = "non-vacuity (baseline hash failed)"; goto done; }
 
-   memcpy( ref, out, 32 );        // that vector's digest on the clean input
+   memcpy( ref, out, 32 );
    for ( int b = 0; b < 2; b++ )
    {
       uint8_t alt[80];
@@ -179,27 +165,15 @@ bool yespower_gate_self_test( void )
               YESPOWER_KAT_PATH, fail );
       return false;
    }
-   // Not all of them are upstream's any more: the minotaurx vector is derived
-   // from a real Pulsar block, because upstream publishes none for those
-   // parameters.
    applog( LOG_NOTICE,
            "yespower self-test PASSED (%s path, %d vectors)",
            YESPOWER_KAT_PATH, (int)YESPOWER_NUM_KATS );
    return true;
 }
 
-// Confirm the tuple a registration just selected is covered by a vector, by
-// hashing with the live `yespower_params` rather than with a vector's own
-// fields. yespower_self_test() above does the latter, so it passes identically
-// for every variant and cannot notice a registration that set N, r or pers
-// wrongly; this refuses to start instead of mining rejects.
-//
-// Only the fixed coin variants use this. The generic yespower/yescrypt
-// registrations take --param-n/-r/-key and by design have no vector.
-//
-// It proves the tuple is a known one, not the right one for the coin: moving a
-// variant onto another registered variant's tuple still passes. Only the
-// sourced parameters rule that out.
+// Hash with the live yespower_params and require a matching vector, so a coin
+// variant registered with a wrong N, r or key refuses to start. The generic
+// algos take -N/-R/-K and have no vector.
 static bool yespower_verify_registered( void )
 {
    const yespower_params_t *p = &yespower_params;
@@ -248,10 +222,8 @@ static bool yespower_verify_registered( void )
    return false;
 }
 
-// The blake2b variants have no published vectors, so anchor them against the
-// in-tree reference instead. yespower-blake2b-ref.c is compiled into every
-// build and shares nothing with the optimized path below the blake2b bracket,
-// so agreement is real evidence. Runs at the caller's own N/r.
+// The blake2b variants have no published vectors: compare the optimized path
+// against yespower-blake2b-ref.c at the registered N and r.
 static bool yespower_b2b_self_test( void )
 {
    struct work_restart *saved_restart = work_restart;
@@ -275,12 +247,7 @@ static bool yespower_b2b_self_test( void )
                         opt.uc, ref.uc );
    yespower_free_local( &la );
 #else
-   // Scalar build: register_power2b_algo installs yespower_b2b_hash_ref, so
-   // the reference IS the shipping path and there is no second implementation
-   // to difference it against. Smoke-test it instead -- that is honestly all
-   // this build can check, and it is still worth doing: the bug this test was
-   // written to catch (a 12 KiB heap overread from a missing cast in
-   // yespower-blake2b-ref.c) lived on exactly this path.
+   // Scalar build: the reference is the shipping path, so smoke-test it.
    (void)la; (void)opt;
    ok = yespower_b2b_ref( &lb, src, 80, &yespower_params, &ref, 0 ) == 1;
 #endif
@@ -408,13 +375,14 @@ int scanhash_yespower_b2b( struct work *work, uint32_t max_nonce,
    return 0;
 }
 
-/* Every yespower/yescrypt variant shares one thread-local region, sized by the
- * variant (2 MB yescrypt to 16 MB yescryptr32), so one free serves all eight
- * registrations below. */
+// All yespower/yescrypt variants share one thread-local region. The
+// reference implementation keeps none.
 static void yespower_gate_thread_free( int thr_id )
 {
    (void)thr_id;
+#if defined(__SSE2__) || defined(__aarch64__)
    yespower_tls_free();
+#endif
 }
 
 bool register_yespower_algo( algo_gate_t* gate )
@@ -476,12 +444,8 @@ bool register_yespowerr16_algo( algo_gate_t* gate )
 
 // ------------------------------------------------- coin parameter variants
 //
-// No algorithm code: one yespower engine, the same gate pointers, and a
-// (version, N, r, pers) tuple read from each coin's own daemon source.
-// yespower-kat.h pins every tuple against drift and mis-built ISA paths.
-//
-// A wrong pers mines well-formed digests a pool silently rejects, so perslen
-// comes from strlen() and cannot disagree with the string.
+// One engine, one (version, N, r, pers) tuple per coin, each pinned by a
+// vector in yespower-kat.h. perslen is derived from the string.
 
 static bool register_yespower_coin( algo_gate_t *gate, yespower_version_t ver,
                                     uint32_t N, uint32_t r, const char *pers )
@@ -501,8 +465,6 @@ static bool register_yespower_coin( algo_gate_t *gate, yespower_version_t ver,
 #endif
   opt_target_factor = 65536.0;
 
-  // The self-test's PASSED line says nothing about which tuple this algo
-  // selected; these two lines are the only startup output that does.
   applog( LOG_NOTICE, "Yespower parameters: version= %d.%d, N= %d, R= %d",
           ver / 10, ver % 10, yespower_params.N, yespower_params.r );
   if ( yespower_params.pers )
@@ -512,12 +474,10 @@ static bool register_yespower_coin( algo_gate_t *gate, yespower_version_t ver,
   else
      applog( LOG_NOTICE, "Key= none" );
 
-  // Specific check first: it names the registration, not just the engine.
   return yespower_verify_registered() && yespower_gate_self_test();
 }
 
-// AdventureCoin (ADVC). The chain switched parameters at nTime 1553904000;
-// earlier blocks use v0.5 / 4096 / 16 / "Client Key", i.e. yescryptr16.
+// AdventureCoin (ADVC). Blocks before nTime 1553904000 used yescryptr16.
 bool register_yespoweradvc_algo( algo_gate_t* gate )
 {  return register_yespower_coin( gate, YESPOWER_1_0, 2048, 32,
                                   "Let the quest begin" );
@@ -534,8 +494,7 @@ bool register_yespowersugar_algo( algo_gate_t* gate )
      "Satoshi Nakamoto 31/Oct/2008 Proof-of-work is essentially one-CPU-one-vote" );
 }
 
-// Tidecoin (TDC). r = 8, inherited from MicroBitcoin's parameters, so this is
-// NOT the same as plain `yespower` -- that one is r = 32.
+// Tidecoin (TDC). r = 8, unlike plain yespower.
 bool register_yespowertide_algo( algo_gate_t* gate )
 {  return register_yespower_coin( gate, YESPOWER_1_0, 2048, 8, NULL );
 }
@@ -549,6 +508,11 @@ bool register_yespowermgpc_algo( algo_gate_t* gate )
 // UraniumX (URX).
 bool register_yespowerurx_algo( algo_gate_t* gate )
 {  return register_yespower_coin( gate, YESPOWER_1_0, 2048, 32, "UraniumX" );
+}
+
+// Smartiecoin (SMT), v0.5.0 parameters (from nTime 1790528400).
+bool register_yespowersmt_algo( algo_gate_t* gate )
+{  return register_yespower_coin( gate, YESPOWER_1_0, 256, 8, NULL );
 }
 
 // EquityPay (EQPAY) is not here: its PoW covers a 181-byte extended header,

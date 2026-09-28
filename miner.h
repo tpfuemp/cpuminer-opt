@@ -797,6 +797,7 @@ enum algos {
         ALGO_YESPOWERLTNCG,
         ALGO_YESPOWERMGPC,
         ALGO_YESPOWERR16,
+        ALGO_YESPOWERSMT,
         ALGO_YESPOWERSUGAR,
         ALGO_YESPOWERTIDE,
         ALGO_YESPOWERURX,
@@ -933,6 +934,7 @@ static const char* const algo_names[] = {
         "yespowerltncg",
         "yespowermgpc",
         "yespowerr16",
+        "yespowersmt",
         "yespowersugar",
         "yespowertide",
         "yespowerurx",
@@ -1064,13 +1066,14 @@ Options:\n\
                           minotaur\n\
                           minotaurx\n\
                           neoscrypt     NeoScrypt(128, 2, 1)\n\
+                          neoscrypt-xaya Xaya (CHI), SpaceXpanse (ROD)\n\
                           nist5         Nist5\n\
                           odo           Odocrypt, DigiByte (DGB)\n\
                           panthera      Scala (XLA)\n\
                           pentablake    5 x blake512\n\
                           phi1612       phi\n\
                           phi2\n\
-                          polytimos\n\
+                          polytimos     Ninja\n\
                           power2b       MicroBitcoin (MBC)\n\
                           quark         Quark\n\
                           qubit         Qubit\n\
@@ -1102,8 +1105,8 @@ Options:\n\
                           timetravel10  Bitcore (BTX)\n\
                           tribus        Denarius (DNR)\n\
                           vanilla       blake256r8vnl (VCash)\n\
-                          veltor\n\
-                          verthash\n\
+                          veltor        (VLT)\n\
+                          verthash      Vertcoin\n\
                           verus         VerusHash 2.2 (Verus Coin)\n\
                           whirlpool\n\
                           whirlpoolx\n\
@@ -1134,7 +1137,15 @@ Options:\n\
                           yescryptr16   Eli\n\
                           yescryptr32   WAVI\n\
                           yespower      Cryply\n\
+                          yespoweradvc  AdventureCoin (ADVC)\n\
+                          yespowereqpay EquityPay (EQPAY)\n\
+                          yespowerltncg Crionic (CRNC)\n\
+                          yespowermgpc  MagpieCoin (MGPC)\n\
                           yespowerr16   Yenten (YTN)\n\
+                          yespowersmt   Smartiecoin (SMT)\n\
+                          yespowersugar Sugarchain (SUGAR)\n\
+                          yespowertide  Tidecoin (TDC)\n\
+                          yespowerurx   UraniumX (URX)\n\
                           yespower-b2b  generic yespower + blake2b\n\
                           zr5           Ziftr\n\
   -N, --param-n=N       N parameter for scrypt based algos\n\

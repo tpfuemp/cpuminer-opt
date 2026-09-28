@@ -2,7 +2,9 @@
 
 **Coins:** Globalboost-Y, BitZeny, Koto, Yenten, MicroBitcoin, Cryply and many others
 **Algorithm names:** `yescrypt`, `yescryptr8`, `yescryptr8g`, `yescryptr16`,
-`yescryptr32`, `yespower`, `yespowerr16`, `yespower-b2b`, `power2b`
+`yescryptr32`, `yespower`, `yespowerr16`, `yespower-b2b`, `power2b`, and the
+coin variants `yespoweradvc`, `yespowereqpay`, `yespowerltncg`, `yespowermgpc`,
+`yespowersmt`, `yespowersugar`, `yespowertide`, `yespowerurx`
 **Family:** memory-hard, CPU-friendly proof-of-work (password-hashing lineage)
 
 ```
@@ -49,6 +51,7 @@ wrong string yields a valid-looking but rejected hash.
 | `yespowerltncg` | 1.0 | 2048 | 32 | `"LTNCGYES"` | Crionic (CRNC) |
 | `yespowermgpc` | 1.0 | 2048 | 32 | `"Magpies are birds of the Corvidae family."` | MagpieCoin (MGPC) |
 | `yespowerr16` | 1.0 | 4096 | 16 | none | Yenten (YTN) |
+| `yespowersmt`⁴ | 1.0 | **256** | **8** | none | Smartiecoin (SMT) |
 | `yespowersugar` | 1.0 | 2048 | 32 | `"Satoshi Nakamoto 31/Oct/2008 Proof-of-work is essentially one-CPU-one-vote"` | Sugarchain (SUGAR) |
 | `yespowertide` | 1.0 | 2048 | **8** | none | Tidecoin (TDC) |
 | `yespowerurx` | 1.0 | 2048 | 32 | `"UraniumX"` | UraniumX (URX) |
@@ -58,6 +61,8 @@ wrong string yields a valid-looking but rejected hash.
 ¹ default, overridable from the command line.
 ² `yespower-b2b` requires `--param-n` and `--param-r`.
 ³ **not a parameter variant** — see below.
+⁴ Smartiecoin's parameters since block nTime 1790528400 (2026-09-27 17:00 UTC).
+N = 256 is below upstream yespower's minimum of 1024, which this miner lowers to 256.
 
 `yespowereqpay` is the one entry in this table that needs more than parameters.
 EquityPay is Qtum-derived, so its proof-of-work covers a **181-byte extended
@@ -77,12 +82,9 @@ MicroBitcoin's parameters, so it is **not** interchangeable with plain `yespower
 parameters at `nTime > 1553904000`; blocks below that used `0.5 / 4096 / 16 /
 "Client Key"`, which is exactly what this miner registers as `yescryptr16`.
 
-The named variants with fixed parameters print their tuple at startup and verify
-it against a known-answer vector before mining, so a wrong parameter refuses to
-start. Note what that does and does not cover: it proves the tuple is one of the
-known ones, not that it is the right one for the coin — the parameters themselves
-were read from each coin's daemon source, which is the evidence that they match
-consensus.
+The named variants print their parameters at startup and check them against a
+known-answer vector before mining, so a wrong parameter refuses to start. The
+parameters themselves come from each coin's daemon source.
 
 `yescryptr8g` (Koto) is the odd one out: its personalization is the block header
 itself, and its length depends on whether the job is sapling (112 bytes) or not
@@ -119,15 +121,10 @@ exact parameters of specific coins (CPUpower, Sugarchain, and the various
 Each implementation matches the reference yescrypt/yespower output; correctness is
 confirmed by pool-accepted shares for the specific coin parameters.
 
-A startup self-test runs the whole known-answer vector table on every yespower
-registration. Fourteen of the vectors are upstream's own; the rest cover
-parameter sets upstream publishes none for, and were produced by agreement
-between this tree's two independent implementations (`yespower()` and
-`yespower_ref()`), except minotaurx's, which is anchored on a real block.
-
-That table is what catches a mis-built or mis-specialised binary: every variant
-shares one source file compiled twice (v0.5 and v1.0) across four ISA paths, and
-any one build exercises a single path.
+A startup self-test runs the known-answer vector table on every yespower
+registration, which catches a mis-built binary. Fourteen vectors are upstream's;
+the others are digests this miner's optimized and reference implementations
+agree on, or, for minotaurx, taken from a real block.
 
 ## Possible optimizations (preview)
 

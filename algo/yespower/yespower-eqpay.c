@@ -1,9 +1,4 @@
-/* EqPay (EQPAY) -- yespower 1.0 over a Qtum-style EXTENDED block header.
- *
- * This is not a yespower parameter variant. EqPay is Qtum-derived and its
- * proof-of-work covers 181 bytes, not 80: GetWorkHash() hashes the full
- * serialization of CBlockHeaderUncached, which appends the EVM state roots and
- * the proof-of-stake fields to the usual header.
+/* EqPay (EQPAY) -- yespower 1.0 over a Qtum-style 181-byte block header.
  *
  *   offset  size  field
  *   0       4     nVersion
@@ -18,9 +13,7 @@
  *   176     4     prevoutStake.n       0xffffffff, COutPoint::NULL_INDEX
  *   180     1     vchBlockSigDlgt length, 0 (empty vector) while mining
  *
- * The layout is checked at startup: sha256d over these bytes must reproduce
- * the genesis hash chainparams.cpp asserts. The two roots come from the
- * Stratum job as a tenth notify parameter.
+ * The startup self-test checks the layout against the genesis block hash.
  */
 #include "yespower.h"
 #include "algo-gate-api.h"
@@ -52,8 +45,7 @@ static yespower_params_t eqpay_params;
   #define EQPAY_PATH  "reference"
 #endif
 
-// srclen != 80, so yespower takes its sha256_full branch and never consults
-// sha256_prehash_ctx. No prehash is set up here, and none is needed.
+// srclen != 80: yespower hashes the full input, no prehash needed.
 int eqpay_hash( const char *input, char *output, int thrid )
 {
    return EQPAY_TLS( (const uint8_t*)input, EQPAY_HDR_SIZE, &eqpay_params,
@@ -72,12 +64,10 @@ int scanhash_eqpay( struct work *work, uint32_t max_nonce,
    uint32_t n = first_nonce;
    const int thr_id = mythr->id;
 
-   // Bytes 0..75: standard fields, to wire order as the rest of the family.
    for ( int k = 0; k < 19; k++ )
       be32enc( &hdr[k], pdata[k] );
 
-   // Bytes 80..180 are already wire order: byte strings, not integers, so
-   // they are copied verbatim and never endian-swapped.
+   // Bytes 80..180 are byte strings, already in wire order.
    memcpy( (uint8_t*)hdr + 80, (uint8_t*)pdata + 80, EQPAY_HDR_SIZE - 80 );
 
    do {
@@ -96,18 +86,15 @@ int scanhash_eqpay( struct work *work, uint32_t max_nonce,
    return 0;
 }
 
-// The standard builder fills bytes 0..79 and memsets the rest of work->data,
-// so the tail is appended after it runs, not before.
+// Append the tail after the standard builder, which clears work->data past 80.
 void eqpay_build_extraheader( struct work *work, struct stratum_ctx *sctx )
 {
    uint8_t *d = (uint8_t*)work->data;
 
    std_build_extraheader( work, sctx );
 
-   /* Both roots arrive as one 64-byte parameter after prevhash -- the slot
-    * phi2 uses, so the generic notify parse leaves them in job.extra. Each is
-    * sent with its 32-bit words byte-swapped; undo that per word, keeping the
-    * word order. A whole-32-byte reversal is wrong. */
+   /* Both roots arrive in job.extra (the phi2 notify slot) with each 32-bit
+    * word byte-swapped. */
    for ( int t = 0; t < 16; t++ )
    {
       const uint8_t *s = sctx->job.extra + t * 4;
@@ -115,9 +102,7 @@ void eqpay_build_extraheader( struct work *work, struct stratum_ctx *sctx )
       o[0] = s[3]; o[1] = s[2]; o[2] = s[1]; o[3] = s[0];
    }
 
-   /* prevoutStake is null for proof-of-work: a zero hash, then
-    * n = COutPoint::NULL_INDEX. Leaving n zero yields a well-formed digest the
-    * pool rejects, so the memset covers only the 32-byte hash. */
+   /* Null prevoutStake: zero hash, n = COutPoint::NULL_INDEX. */
    memset( d + EQPAY_STAKE_OFS, 0, 32 );
    d[ EQPAY_STAKE_N_OFS + 0 ] = 0xff;
    d[ EQPAY_STAKE_N_OFS + 1 ] = 0xff;
@@ -130,10 +115,8 @@ void eqpay_build_extraheader( struct work *work, struct stratum_ctx *sctx )
 
 // --------------------------------------------------------------- self-test
 //
-// EqPay mainnet genesis, from chainparams.cpp: nVersion/nTime/nBits/nNonce and
-// the asserted block hash, plus the two roots. GetHash() is sha256d over the
-// same bytes GetWorkHash() hashes, so the asserted hash validates the
-// serialization independently of this code.
+// EqPay mainnet genesis header. Its sha256d is the chain's genesis block hash,
+// which validates the serialization.
 static const uint8_t eqpay_kat_header[ EQPAY_HDR_SIZE ] =
 {
    0x01,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
@@ -213,8 +196,7 @@ static bool eqpay_self_test( void )
    if ( !valid_hash( (uint32_t*)out, eqpay_kat_target ) )
    {  fail = "genesis digest does not clear its nBits target"; goto done; }
 
-   // 4. Non-vacuity, specifically that the extended tail is hashed: an
-   //    80-byte hash or a wrong length would pass every check above.
+   // 4. The extended tail must affect the digest.
    memcpy( alt, eqpay_kat_header, EQPAY_HDR_SIZE );
    alt[ EQPAY_STATE_ROOT_OFS ] ^= 0x01;
    if ( !eqpay_hash( (const char*)alt, (char*)sd, 0 )

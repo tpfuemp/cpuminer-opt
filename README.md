@@ -182,6 +182,7 @@ Supported Algorithms
                           yespowerltncg Crionic (CRNC)
                           yespowermgpc  MagpieCoin (MGPC)
                           yespowerr16   Yenten (YTN)
+                          yespowersmt   Smartiecoin (SMT)
                           yespowersugar Sugarchain (SUGAR)
                           yespowertide  Tidecoin (TDC)
                           yespowerurx   UraniumX (URX)

@@ -132,6 +132,7 @@ bool register_yespowereqpay_algo( algo_gate_t *gate );
 bool register_yespowerltncg_algo( algo_gate_t *gate );
 bool register_yespowermgpc_algo( algo_gate_t *gate );
 bool register_yespowerr16_algo( algo_gate_t *gate );
+bool register_yespowersmt_algo( algo_gate_t *gate );
 bool register_yespowersugar_algo( algo_gate_t *gate );
 bool register_yespowertide_algo( algo_gate_t *gate );
 bool register_yespowerurx_algo( algo_gate_t *gate );

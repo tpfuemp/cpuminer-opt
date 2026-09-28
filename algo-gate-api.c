@@ -426,6 +426,7 @@ case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_YESPOWERLTNCG: rc = register_yespowerltncg_algo( gate ); break;
     case ALGO_YESPOWERMGPC: rc = register_yespowermgpc_algo  ( gate ); break;
     case ALGO_YESPOWERR16:  rc = register_yespowerr16_algo   ( gate ); break;
+    case ALGO_YESPOWERSMT:  rc = register_yespowersmt_algo   ( gate ); break;
     case ALGO_YESPOWERSUGAR: rc = register_yespowersugar_algo( gate ); break;
     case ALGO_YESPOWERTIDE: rc = register_yespowertide_algo  ( gate ); break;
     case ALGO_YESPOWERURX:  rc = register_yespowerurx_algo   ( gate ); break;

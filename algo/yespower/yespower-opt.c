@@ -1073,9 +1073,9 @@ int yespower(yespower_local_t *local,
    uint8_t sha256[32];
    sha256_context sha256_ctx;
 
-   /* Sanity-check parameters */
+   /* Sanity-check parameters. N >= 256 (upstream: 1024) for yespowersmt. */
    if ( (version != YESPOWER_0_5 && version != YESPOWER_1_0)
-      || N < 1024 || N > 512 * 1024 || r < 8 || r > 32
+      || N < 256 || N > 512 * 1024 || r < 8 || r > 32
       || (N & (N - 1)) != 0 || ( !pers && perslen ) )
    {
       errno = EINVAL;
