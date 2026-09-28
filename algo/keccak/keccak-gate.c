@@ -122,9 +122,10 @@ bool register_sha3t_algo( algo_gate_t* gate )
   gate->scanhash  = (void*)&scanhash_sha3t_2x64;
   gate->hash      = (void*)&sha3t_hash_2x64;
 #else
-  if ( !sha3t_self_test() ) return false;
+  // sha3t_hash stays the oracle; SHA3T_SCALAR_HASH is what mines.
+  if ( !sha3t_1way_self_test() ) return false;
   gate->scanhash  = (void*)&scanhash_sha3t;
-  gate->hash      = (void*)&sha3t_hash;
+  gate->hash      = (void*)&SHA3T_SCALAR_HASH;
 #endif
   return true;
 };

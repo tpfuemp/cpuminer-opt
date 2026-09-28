@@ -24,6 +24,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "sph_keccak.h"
+#include "keccak-hash-4way.h"   // sha3_256_prepad80 / _prepad32
 
 // Always compiled: the n-way self-tests use it as differential oracle even
 // where the scalar scanhash below is compiled out.
@@ -81,15 +82,69 @@ bool sha3t_kat_check( void )
    return true;
 }
 
-bool sha3t_self_test( void )
+#if !defined(SHA3T_8WAY) && !defined(SHA3T_4WAY) && !defined(SHA3T_2WAY)
+
+// Scalar mining driver: the same three passes as sha3t_hash(), driven from a
+// pre-padded state instead of init/update/close. Each message is a single rate
+// block (80, 32, 32 against a 136 B rate), so the padded block is known up
+// front: no buffer, no padding VLA, 2 NOT64s per pass instead of 6. The 1-way
+// analogue of sha3t_{8,4,2}x64_prepad; the kernel itself is shared, not new.
+// NOTE: SHA3 padding (0x06) is baked in and hard_coded_eb is ignored -- right
+// for sha3t, wrong for keccak/sha3d. See keccak-hash-4way.h.
+void sha3t_hash_prepad( void *state, const void *input )
 {
-   if ( !sha3t_kat_check() ) return false;
-   applog( LOG_NOTICE,
-           "sha3t self-test PASSED (consensus KAT, BC3 blocks 44172/39663)" );
-   return true;
+   uint32_t _ALIGN(64) pass1[8];
+   uint32_t _ALIGN(64) pass2[8];
+
+   // Separate buffers: sha3_256_prepad32 happens to read src fully before
+   // writing dst, but it does not promise to.
+   sha3_256_prepad80( pass1, input );
+   sha3_256_prepad32( pass2, pass1 );
+   sha3_256_prepad32( state, pass2 );
 }
 
-#if !defined(SHA3T_8WAY) && !defined(SHA3T_4WAY) && !defined(SHA3T_2WAY)
+#define SHA3T_1WAY_DIFF_ITERS 64
+
+// Differential against sha3t_hash(), which reaches keccak through sph_keccak.c
+// and so shares no code with this path. Fatal, like the batched widths' tests.
+bool sha3t_1way_self_test( void )
+{
+   if ( !sha3t_kat_check() )
+   {
+      applog( LOG_ERR, "sha3t scalar reference KAT mismatch - cannot anchor" );
+      return false;
+   }
+
+   uint32_t lcg = 0x9e3779b9u;
+   for ( int it = 0; it < SHA3T_1WAY_DIFF_ITERS; it++ )
+   {
+      uint32_t _ALIGN(64) edata[20];
+      uint32_t _ALIGN(64) ref[8];
+      uint32_t _ALIGN(64) got[8];
+
+      for ( int i = 0; i < 20; i++ )
+      {
+         lcg = lcg * 1664525u + 1013904223u;
+         edata[i] = lcg;
+      }
+
+      sha3t_hash( ref, edata );
+      sha3t_hash_prepad( got, edata );
+
+      if ( memcmp( ref, got, 32 ) != 0 )
+      {
+         applog( LOG_ERR, "sha3t 1-way differential FAILED: iter %d", it );
+         return false;
+      }
+   }
+
+   // Name the live driver so two builds cannot log the same line.
+   applog( LOG_NOTICE,
+           "sha3t 1-way self-test PASSED (consensus KAT + %d differential), "
+           "mining driver: %s",
+           SHA3T_1WAY_DIFF_ITERS, SHA3T_SCALAR_HASH_NAME );
+   return true;
+}
 
 int scanhash_sha3t( struct work *work, uint32_t max_nonce,
                     uint64_t *hashes_done, struct thr_info *mythr )
@@ -109,7 +164,7 @@ int scanhash_sha3t( struct work *work, uint32_t max_nonce,
 
    do {
       be32enc( &endiandata[19], n );
-      sha3t_hash( hash64, endiandata );
+      SHA3T_SCALAR_HASH( hash64, endiandata );
 
       if ( unlikely( valid_hash( hash64, ptarget ) && !bench ) )
       {
