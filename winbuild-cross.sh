@@ -97,7 +97,7 @@ build avx512-sha-vaes "-march=icelake-client" "$DEFAULT_CFLAGS"
 # AVX512 AES: Intel Core HEDT Skylake-X, Cascadelake
 build avx512          "-march=skylake-avx512" "$DEFAULT_CFLAGS"
 # AVX2 SHA VAES: Intel Alderlake, AMD Zen3
-build avx2-sha-vaes   "-mavx2 -msha -mvaes"   "$DEFAULT_CFLAGS"
+build avx2-sha-vaes   "-mavx2 -msha -mvaes -mpclmul" "$DEFAULT_CFLAGS"
 # AVX2 AES SHA: AMD Zen1
 build avx2-sha        "-march=znver1"         "$DEFAULT_CFLAGS"
 # AVX2 AES: Intel Core Haswell, Skylake, Kabylake, Coffeelake, Cometlake
