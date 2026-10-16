@@ -212,8 +212,8 @@ static void next_addresses(block *address_block, block *input_block) {
     __m256i zero_block[ARGON2_HWORDS_IN_BLOCK];
     __m256i zero2_block[ARGON2_HWORDS_IN_BLOCK];
 #else
-    v128_t zero_block[ARGON2_OWORDS_IN_BLOCK];
-    v128_t zero2_block[ARGON2_OWORDS_IN_BLOCK];
+    v128u64_t zero_block[ARGON2_OWORDS_IN_BLOCK];
+    v128u64_t zero2_block[ARGON2_OWORDS_IN_BLOCK];
 #endif
 
     memset(zero_block, 0, sizeof(zero_block));

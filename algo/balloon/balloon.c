@@ -112,8 +112,8 @@ static inline void balloon_sha256_blocks( uint8_t *out, const uint8_t *blk,
    uint32_t state[8] __attribute__((aligned(64)));
 
    memcpy( state, balloon_sha256_iv, sizeof state );
-   for ( int i = 0; i < nblocks; i++ )
-      sha256_transform_be( state, blk + 64*i, state );
+   for ( int i = 0; i < nblocks; i++ )   /* scalar path takes const uint32_t* */
+      sha256_transform_be( state, (const uint32_t*)( blk + 64*i ), state );
 
    for ( int i = 0; i < 8; i++ )
       ( (uint32_t*)out )[i] = bswap_32( state[i] );
