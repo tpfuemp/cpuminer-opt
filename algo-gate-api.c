@@ -287,10 +287,14 @@ static void init_algo_gate( algo_gate_t* gate )
    gate->work_cmp_size           = STD_WORK_CMP_SIZE;
 }
 
+char algo_register_error[256] = { 0 };
+
 // Called once by main
 bool register_algo_gate( int algo, algo_gate_t *gate )
 {
   bool rc = false;
+
+  algo_register_error[0] = '\0';
 
   if ( NULL == gate )
   {
@@ -312,6 +316,7 @@ bool register_algo_gate( int algo, algo_gate_t *gate )
 case ALGO_ARGON2ID1024: rc = register_argon2id1024_algo  ( gate ); break;
     case ALGO_AXIOM:        rc = register_axiom_algo         ( gate ); break;
     case ALGO_BALLOON:      rc = register_balloon_algo       ( gate ); break;
+    case ALGO_BC3HASH:      rc = register_bc3hash_algo       ( gate ); break;
     case ALGO_BLAKE:        rc = register_blake_algo         ( gate ); break;
     case ALGO_BLAKE2B:      rc = register_blake2b_algo       ( gate ); break;
     case ALGO_BLAKE2S:      rc = register_blake2s_algo       ( gate ); break;
@@ -464,6 +469,7 @@ void exec_hash_function( int algo, void *output, const void *pdata )
 const char* const algo_alias_map[][2] =
 {
 //   alias                proper
+  { "bc3",               "bc3hash"        },   /* Bitcoin III (BC3)       */
   { "bcd",               "x13bcd"         },
   { "bitcore",           "timetravel10"   },
   { "blake256r8",        "blakecoin"      },

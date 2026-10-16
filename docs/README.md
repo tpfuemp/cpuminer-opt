@@ -93,10 +93,11 @@ Per-algorithm documentation lives in [`algorithms/`](algorithms/):
 - [yescrypt / yespower family](algorithms/yescrypt-yespower.md) — BitZeny, Koto, Yenten, MicroBitcoin and others
 - [Argon2d family](algorithms/argon2d.md) — Credits, Dynamic, Unitus
 - [Balloon](algorithms/balloon.md) — Mateable (MTBC)
+- [bc3hash](algorithms/bc3hash.md) — Bitcoin III (BC3), from block 64360
 - [Lyra2 family](algorithms/lyra2.md) — Vertcoin, Monacoin, Zcoin/Firo, Garlicoin
 - [X-chains (x11–x17 and relatives)](algorithms/x-chains.md) — Dash and many others
 - [SkyDoge](algorithms/skydoge.md) — SkyDoge
-- [SHA3T](algorithms/sha3t.md) — BitcoinIII (BC3), Fjarcode (FJAR)
+- [SHA3T](algorithms/sha3t.md) — Fjarcode (FJAR), BitcoinIII (BC3) before block 64360
 - [HeavyHash](algorithms/heavyhash.md) — Optical Bitcoin (OBTC), Ursula (URSA)
 - [Simple & legacy hashes](algorithms/simple-hashes.md) — sha256d, blake, keccak, groestl, skein, quark and more
 

@@ -53,13 +53,24 @@ dist_man_MANS = cpuminer.1
 # runs. It includes the same vendored headers, so it needs the same scoped -I
 # and the same -Wno-, and therefore belongs in this library rather than in
 # cpuminer_SOURCES.
-noinst_LIBRARIES = libcurvehash_secp256k1.a
+noinst_LIBRARIES = libcurvehash_secp256k1.a \
+  libbc3hash.a
 libcurvehash_secp256k1_a_SOURCES = algo/curvehash/secp256k1_unity.c \
   algo/curvehash/curvehash-kernel.c
 libcurvehash_secp256k1_a_CPPFLAGS = $(ALL_INCLUDES) \
   -I$(top_srcdir)/algo/curvehash/secp256k1
 libcurvehash_secp256k1_a_CFLAGS = $(disable_flags) \
   -Wno-unknown-warning-option -Wno-nonnull-compare -Wno-unused-function
+
+# bc3hash's C++ core, using the secp256k1 above through its public API. Own
+# library so the secp -I and C++17 apply to these objects only. In
+# cpuminer_LDADD it must precede libcurvehash_secp256k1.a.
+libbc3hash_a_SOURCES = algo/bc3hash/bc3hash-core.cpp \
+  algo/bc3hash/bc3hash-hashes-framework.cpp
+libbc3hash_a_CPPFLAGS = $(ALL_INCLUDES) \
+  -I$(top_srcdir)/algo/bc3hash \
+  -I$(top_srcdir)/algo/curvehash/secp256k1/include
+libbc3hash_a_CXXFLAGS = $(disable_flags) -std=c++17
 
 # RandomX: the tevador BSD-3 core, vendored under algo/randomx/randomx.
 # Provenance, dropped files, re-sync procedure and build notes: VENDOR.md there.
@@ -345,6 +356,7 @@ cpuminer_SOURCES = \
   algo/cubehash/cube-hash-2way.c \
   algo/cubehash/sph_cubehash.c \
   algo/curvehash/curvehash-gate.c \
+  algo/bc3hash/bc3hash-gate.c \
   algo/equihash/equihash.c \
   algo/equihash/equihash-ref.c \
   algo/equihash/equihash-simd.c \
@@ -653,7 +665,7 @@ else
 cpuminer_SOURCES += algo/randomx/randomx-stub.c
 endif
 
-cpuminer_LDADD	= libcurvehash_secp256k1.a $(RANDOMX_LIBS) $(EXTRA_LIBS) @LIBCURL@ -ljansson @PTHREAD_LIBS@ @WS2_LIBS@ -lgmp build-stamp.$(OBJEXT)
+cpuminer_LDADD	= libbc3hash.a libcurvehash_secp256k1.a $(RANDOMX_LIBS) $(EXTRA_LIBS) @LIBCURL@ -ljansson @PTHREAD_LIBS@ @WS2_LIBS@ -lgmp build-stamp.$(OBJEXT)
 
 # Carries the date for the "SW built on" banner. Depends on the objects, so it
 # is regenerated exactly when a relink is due: `make` with nothing to do stays a
@@ -669,7 +681,7 @@ CLEANFILES = build-stamp.c build-stamp.$(OBJEXT) \
   librandomx_arq.a librandomx_arq.a.* \
   librandomx_panthera.a librandomx_panthera.a.*
 
-build-stamp.c: $(cpuminer_OBJECTS) libcurvehash_secp256k1.a $(RANDOMX_LIBS)
+build-stamp.c: $(cpuminer_OBJECTS) libcurvehash_secp256k1.a libbc3hash.a $(RANDOMX_LIBS)
 	$(AM_V_GEN)printf 'const char build_stamp_date[] = "%s";\n' \
 	  "`date '+%b %d %Y %H:%M:%S'`" > $@
 

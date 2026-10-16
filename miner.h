@@ -682,6 +682,7 @@ enum algos {
         ALGO_ARGON2ID1024,
         ALGO_AXIOM,
         ALGO_BALLOON,
+        ALGO_BC3HASH,
         ALGO_BLAKE,       
         ALGO_BLAKE2B,
         ALGO_BLAKE2S,     
@@ -819,6 +820,7 @@ static const char* const algo_names[] = {
         "argon2id1024",
         "axiom",
         "balloon",
+        "bc3hash",
         "blake",
         "blake2b",
         "blake2s",
@@ -1022,6 +1024,8 @@ Options:\n\
                           argon2id1024  Bitweb (WEB)\n\
                           axiom         Shabal-256 MemoHash\n\
                           balloon       Mateable (MTBC)\n\
+                          bc3hash       Bitcoin III (BC3), alias bc3\n\
+                          bc3hash:W     curve table window W, 10..20 (default 16)\n\
                           blake         blake256r14 (SFR)\n\
                           blake2b       Blake2b 256\n\
                           blake2s       Blake-2 S\n\
@@ -1093,7 +1097,7 @@ Options:\n\
                           sha256q       Quad SHA-256, Pyrite (PYE)\n\
                           sha256t       Triple SHA-256, Onecoin (OC)\n\
                           sha3d         Double Keccak256 (BSHA3)\n\
-                          sha3t         Triple SHA3-256, BitcoinIII (BC3), Fjarcode (FJAR)\n\
+                          sha3t         Triple SHA3-256, Fjarcode (FJAR), BC3 before block 64360\n\
                           sha512256d    Double SHA-512 (Radiant)\n\
                           skein         Skein+Sha (Skeincoin)\n\
                           skein2        Double Skein (Woodcoin)\n\

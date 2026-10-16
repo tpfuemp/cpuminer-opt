@@ -1,6 +1,7 @@
 # SHA3T (SHA3-256t)
 
-**Coins:** BitcoinIII (BC3), Fjarcode (FJAR)
+**Coins:** Fjarcode (FJAR); BitcoinIII (BC3) from block 30240 up to 64359. From
+block 64360 BC3 mines [bc3hash](bc3hash.md).
 **Algorithm name:** `sha3t` (alias: `sha3-256t`, the pool-side name)
 **Family:** iterated single-primitive hash
 
@@ -77,9 +78,9 @@ block hash *is* the sha3t digest of its header, the vectors are two real mainnet
 headers — **44172** and **39663** — rather than synthetic inputs, so they pin the
 algorithm to the live chain's consensus, not just to another implementation.
 
-Both are post-fork blocks: BC3 selects the block-hash algorithm on version bit 12 and
-only sets it from height 30240 on, so a pre-fork block hashes with SHA-256d and is
-useless as an anchor.
+Both are from the SHA3-256t era: BC3 selects the block-hash algorithm on version bit 12
+and only sets it from height 30240 on, so an earlier block hashes with SHA-256d and is
+useless as an anchor. From height 64360, version bit 11 selects bc3hash instead.
 
 On builds with a batched path, the KAT anchors the scalar reference and the batched path
 is then compared against it lane-by-lane over 64 randomised headers, so every lane and

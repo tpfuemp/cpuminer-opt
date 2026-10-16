@@ -283,6 +283,7 @@ const char **api_ctl_algo_params( int algo, size_t *count )
    switch ( algo )
    {
       case ALGO_SCRYPT:
+      case ALGO_BC3HASH:      /* n = curve table window */
          *count = 1; return params_n;
       case ALGO_YESPOWER:
       case ALGO_YESCRYPT:
@@ -480,7 +481,11 @@ static bool switch_algo( int new_algo, bool memcheck )
 
    if ( !register_algo_gate( new_algo, &algo_gate ) )
    {
-      ctl_set_error( "algo %s failed to register", algo_names[ new_algo ] );
+      if ( algo_register_error[0] )
+         ctl_set_error( "algo %s failed to register: %s",
+                        algo_names[ new_algo ], algo_register_error );
+      else
+         ctl_set_error( "algo %s failed to register", algo_names[ new_algo ] );
       opt_algo = prev;
       /* Put the old gate back; its registration already succeeded once, so
        * this is the one call in the rollback path that must not fail. */

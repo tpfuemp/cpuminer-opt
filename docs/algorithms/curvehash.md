@@ -4,9 +4,9 @@
 -a curvehash        (alias: -a curve)
 ```
 
-Pulsar's elliptic-curve proof of work, and **the only public-key PoW in this miner**. Every other
-algorithm here is a symmetric hash; this one spends essentially all of its time doing secp256k1
-scalar multiplication.
+Pulsar's elliptic-curve proof of work, and **the first public-key PoW in this miner** (the
+second is [bc3hash](bc3hash.md)). Every other algorithm here is a symmetric hash; this one spends
+essentially all of its time doing secp256k1 scalar multiplication.
 
 ## Read this first: expected speed
 

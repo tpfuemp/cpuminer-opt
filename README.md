@@ -65,6 +65,8 @@ Supported Algorithms
                           argon2id1024  Bitweb (WEB)
                           axiom         Shabal-256 MemoHash
                           balloon       Mateable (MTBC)
+                          bc3hash       Bitcoin III (BC3), alias bc3
+                          bc3hash:W     curve table window W, 10..20 (default 16)
                           blake         Blake-256
                           blake2b       Blake2-512
                           blake2s       Blake2-256
@@ -133,7 +135,7 @@ Supported Algorithms
                           sha256q       Quad SHA-256
                           sha256t       Triple SHA-256
                           sha3d         Double keccak256 (BSHA3)
-                          sha3t         Triple SHA3-256, BitcoinIII (BC3), Fjarcode (FJAR)
+                          sha3t         Triple SHA3-256, Fjarcode (FJAR), BC3 before block 64360
                           sha512256d
                           skein         Skein+Sha (Skeincoin)
                           skein2        Double Skein (Woodcoin)

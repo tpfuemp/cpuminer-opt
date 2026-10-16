@@ -349,6 +349,10 @@ int std_get_work_data_size();
 // by calling the algo's register function.
 bool register_algo_gate( int algo, algo_gate_t *gate );
 
+// Optional reason a registration failed, set by the algo; cleared by
+// register_algo_gate. The runtime switch returns it in its 409.
+extern char algo_register_error[256];
+
 // Called by algos to verride any default gate functions that are applicable
 // and do any other algo-specific initialization.
 // The register functions for all the algos can be declared here to reduce
