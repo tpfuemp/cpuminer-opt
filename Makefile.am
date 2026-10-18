@@ -62,15 +62,19 @@ libcurvehash_secp256k1_a_CPPFLAGS = $(ALL_INCLUDES) \
 libcurvehash_secp256k1_a_CFLAGS = $(disable_flags) \
   -Wno-unknown-warning-option -Wno-nonnull-compare -Wno-unused-function
 
-# bc3hash's C++ core, using the secp256k1 above through its public API. Own
-# library so the secp -I and C++17 apply to these objects only. In
-# cpuminer_LDADD it must precede libcurvehash_secp256k1.a.
+# bc3hash's C++ core and its EC kernel (bc3hash-ec.c, on the static internals
+# of the libsecp256k1 in algo/bc3hash/secp256k1). The core also calls the
+# secp256k1 above, as the kernel's startup oracle. Own library so -I, C++17
+# and -Wno-unused-function stay local. In cpuminer_LDADD it must precede
+# libcurvehash_secp256k1.a.
 libbc3hash_a_SOURCES = algo/bc3hash/bc3hash-core.cpp \
-  algo/bc3hash/bc3hash-hashes-framework.cpp
+  algo/bc3hash/bc3hash-hashes-framework.cpp \
+  algo/bc3hash/bc3hash-ec.c
 libbc3hash_a_CPPFLAGS = $(ALL_INCLUDES) \
   -I$(top_srcdir)/algo/bc3hash \
   -I$(top_srcdir)/algo/curvehash/secp256k1/include
 libbc3hash_a_CXXFLAGS = $(disable_flags) -std=c++17
+libbc3hash_a_CFLAGS = $(disable_flags) -Wno-unused-function
 
 # RandomX: the tevador BSD-3 core, vendored under algo/randomx/randomx.
 # Provenance, dropped files, re-sync procedure and build notes: VENDOR.md there.

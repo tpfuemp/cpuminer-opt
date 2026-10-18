@@ -20,8 +20,8 @@ secp256k1 scalar multiplications and 256-bit modular exponentiations, and there 
 SIMD trick that closes the gap. Like curvehash, this algorithm is supported for
 coverage and correctness parity, not because CPU mining it is competitive.
 
-Startup is not free either: at the default window the miner spends ~27 s building
-256 MB of curve tables before a single nonce is tried. See the
+Startup builds 256 MB of curve tables at the default window before the first nonce:
+about 1.3 s on an i7-7700K and 7 s on an RK3588S. See the
 [Window and startup cost](#window-and-startup-cost) section below.
 
 Measured baselines (2026-10-16, both pool-confirmed, Intel Xeon E5-2680 v4 @ 2.40 GHz):
@@ -92,8 +92,15 @@ than a division. Each finalisation inversion is a binary extended-Euclid that in
 several exact quotients at once from intervals around the top 62 bits.
 
 All rounds are **strictly serial within a nonce** — round *r+1*'s scalars are derived
-from round *r*'s state — so the only parallelism is across nonces, one per thread.
-There is no n-way path.
+from round *r*'s state. Each thread therefore runs 16 nonces in lockstep. Their
+arithmetic stays separate, but every field inversion (the four curve multiplications
+of each 256-bit round and the 64 finalisation steps) is shared across the lanes with
+Montgomery's trick: one inversion plus a few multiplications instead of sixteen.
+
+On CPUs with AVX-512 IFMA (Ice/Tiger/Rocket Lake, Sapphire/Granite Rapids, Zen 4/5), builds for
+those targets also run the fixed-exponent powerings of all 16 lanes in AVX-512 registers,
+8 lanes per register, and add up the curve points of eight scalar multiplications at once.
+The miner's startup lines say which paths it took.
 
 ## Window and startup cost
 
@@ -104,13 +111,12 @@ startup known-answer test confirms by passing at both 10 and 16.
 | W | Tables | Rough build cost |
 |---|---|---|
 | 10 | 6 MB | fast |
-| 16 | 256 MB | ~27 s on the machine above |
-| 20 | 3.1 GB | minutes |
+| 16 | 256 MB | ~1.3 s (i7-7700K), ~7 s (RK3588S) |
+| 20 | 3.1 GB | ~16 times window 16 (not measured) |
 
 Floor 10 is the reference's own compact setting, below which the table count grows
 while each digit still costs one scalar multiplication — the build gets cheaper and
-mining gets slower. Ceiling 20 is where the build stops being worth waiting for, not
-a consensus limit.
+mining gets slower. Ceiling 20 is a memory limit, not a consensus one.
 
 The tables are one shared read-only copy for the whole process, so thread count does
 not change their memory footprint and the miner's per-thread workspace auto-cap does
@@ -118,11 +124,19 @@ not apply to them.
 
 ## Implementation notes
 
-The EC arithmetic is **not new code**. bc3hash links the same vendored libsecp256k1
-that [curvehash](curvehash.md) uses (`algo/curvehash/secp256k1`, built once as
-`libcurvehash_secp256k1.a`) and calls its pristine public API — `ec_pubkey_parse`,
-`ec_pubkey_combine`, `ec_pubkey_serialize`. Only the tables differ: four arbitrary
-base points instead of the generator.
+The EC arithmetic is libsecp256k1's, not new code. `algo/bc3hash/bc3hash-ec.c` includes
+the field and group internals of a recent libsecp256k1 (vendored under
+`algo/bc3hash/secp256k1`, headers only) and owns just the call sequence: each scalar
+multiplication is a sum of table points with variable-time additions, and the four
+multiplications of a 256-bit round go Jacobian-to-affine together, sharing one
+variable-time inversion. The public API would pay a constant-time inversion plus a
+serialize per multiplication. All of it is public hash data, so variable time is fine.
+
+The older libsecp256k1 that [curvehash](curvehash.md) vendors stays linked as the
+kernel's **startup oracle**: it recomputes k*P for all four base points with its own
+scalar multiplication, independent of the tables and of the kernel. The two must agree
+on edge-case scalars (1, n-1, n, n+1, 2^256-1, ...), random scalars, and scalars that put
+one digit value in every table row at once, or the algorithm refuses to register.
 
 The five standard primitives are also not new code. The vendored reference carried
 its own from-scratch SHA3/SHA-512/RIPEMD-160/BLAKE2s/BLAKE2b; those are dropped and
@@ -175,6 +189,5 @@ it, which confirms the target scale of 1.0.
   whatever fraction the pre-hashes actually cost.
 - The scalar multiplications are fixed-base and already table-driven. A wider window
   is exactly what `-a bc3hash:W` buys; past 20 the build time is the blocker.
-- Montgomery's trick — batching one inversion for N nonces — is the lever curvehash
-  uses across nonces, and it applies here to the 256-bit field inversions in the
-  finalisation. Not implemented.
+- Montgomery's trick across nonces is implemented (see above), for both the curve
+  multiplications and the finalisation inversions.

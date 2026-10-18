@@ -2,6 +2,8 @@
 #include "bc3hash-constants.hpp"
 #include "bc3hash-uint.hpp"
 #include "bc3hash-hashes.hpp"
+#include "bc3hash-ec.h"
+#include "bc3hash-ifma.hpp"
 #include <secp256k1.h>
 
 #include <algorithm>
@@ -25,86 +27,81 @@ unsigned active_window()
 const FixedExponent<M64, 3> exp64(E64);
 const FixedExponent<M128, 4> exp128(E128);
 const FixedExponent<M256, 4> exp256(E256);
-struct SecpContext {
-    secp256k1_context* p = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
-    SecpContext()
-    {
-        if (!p) throw std::bad_alloc();
-    }
-    ~SecpContext() { secp256k1_context_destroy(p); }
-};
-const SecpContext& context()
+// secp256k1 group order, parsed once (U256::hex is not constexpr).
+const U256 curve_order = U256::hex("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
+bc3ec_affine to_affine(const U256& x, const U256& y)
 {
-    // Never destroyed: the miner calls exit() with hashing threads still running.
-    static const SecpContext& c = *new SecpContext;
-    return c;
+    bc3ec_affine a;
+    for (unsigned i = 0; i < 4; ++i) {
+        a.x[i] = x.v[i];
+        a.y[i] = y.v[i];
+    }
+    return a;
+}
+std::pair<U256, U256> from_affine(const bc3ec_affine& a)
+{
+    std::pair<U256, U256> r;
+    for (unsigned i = 0; i < 4; ++i) {
+        r.first.v[i] = a.x[i];
+        r.second.v[i] = a.y[i];
+    }
+    return r;
 }
 struct alignas(64) CurveTable {
     const unsigned window = active_window();
     const unsigned digits = (256 + window - 1) / window;
     const unsigned entries = (1u << window) - 1;
     const unsigned last_entries = (1u << (256 - window * (digits - 1))) - 1;
-    // Each opaque public key occupies one cache line. The final window has
-    // fewer bits; omit unreachable entries instead of padding that row.
-    // C++17 aligned new lets std::vector honour the alignas.
+    // Each affine point (bc3hash-ec.c storage form) occupies one cache line.
+    // The final window has fewer bits; omit unreachable entries instead of
+    // padding that row. C++17 aligned new lets std::vector honour the alignas.
     struct alignas(64) Key {
-        secp256k1_pubkey value;
+        unsigned char value[BC3EC_ENTRY_BYTES];
     };
-    // Frozen in the ctor rather than fetched per call: operator() runs 64x per
-    // hash and context() is a function-local static, so calling it there is a
-    // guard load on every one of those.
-    secp256k1_context* ctx = nullptr;
-    static_assert(sizeof(secp256k1_pubkey) == 64, "one cache line per table entry");
+    static_assert(sizeof(Key) == 64, "one cache line per table entry");
     std::vector<Key> table;
-    CurveTable(U256 x, U256 y) : table((digits - 1) * entries + last_entries)
+    const U256 base_x, base_y;
+    CurveTable(U256 x, U256 y) : table((digits - 1) * entries + last_entries), base_x(x), base_y(y)
     {
-        ctx = context().p;
-        std::array<unsigned char, 65> encoded{};
-        encoded[0] = 4;
-        x.store(encoded.data() + 1);
-        y.store(encoded.data() + 33);
-        secp256k1_pubkey base;
-        if (!secp256k1_ec_pubkey_parse(ctx, &base, encoded.data(), 65)) throw std::runtime_error("Invalid BC3 curve constant");
+        static_assert(BC3EC_MAX_POINTS * 10 >= 256, "26 digits at window 10");
+        bc3ec_affine base = to_affine(x, y), next;
         for (unsigned i = 0; i < digits; ++i) {
-            auto* row = table.data() + i * entries;
-            const unsigned count = i + 1 == digits ? last_entries : entries;
-            row[0].value = base;
-            for (unsigned j = 1; j < count; ++j) {
-                const secp256k1_pubkey* points[] = {&row[j - 1].value, &base};
-                if (!secp256k1_ec_pubkey_combine(ctx, &row[j].value, points, 2)) throw std::runtime_error("BC3 curve table failure");
-            }
-            if (i + 1 < digits) {
-                const secp256k1_pubkey* points[] = {&row[entries - 1].value, &row[0].value};
-                if (!secp256k1_ec_pubkey_combine(ctx, &base, points, 2)) throw std::runtime_error("BC3 curve table failure");
-            }
+            const bool last = i + 1 == digits;
+            const int rc = bc3ec_row(table.data() + i * entries, last ? last_entries : entries, &base, last ? nullptr : &next);
+            if (rc == -2) throw std::bad_alloc();
+            if (rc) throw std::runtime_error("Invalid BC3 curve constant");
+            if (!last) base = next;
         }
     }
-    std::pair<U256, U256> operator()(U256 k) const
+    // Table entries summing to k*P, prefetched; 0 when k = 0 (mod n).
+    unsigned points(U256 k, const void** pts) const
     {
-        const U256 order = U256::hex("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
-        if (k >= order) k = k - order;
-        if (k.zero()) return {INVALID_POINT_x, INVALID_POINT_y};
-        std::array<const secp256k1_pubkey*, 26> points;
-        std::size_t n = 0;
+        if (k >= curve_order) k = k - curve_order;
+        if (k.zero()) return 0;
+        unsigned n = 0;
         for (unsigned i = 0; i < digits; ++i) {
             const unsigned pos = i * window, limb = pos / 64, shift = pos % 64;
             std::uint64_t b = k.v[limb] >> shift;
             if (shift && limb + 1 < 4) b |= k.v[limb + 1] << (64 - shift);
             b &= entries;
             if (b) {
-                points[n] = &table[i * entries + b - 1].value;
+                pts[n] = table[i * entries + b - 1].value;
                 // Issue independent cache misses together, ahead of the
-                // library's dependent sequence of elliptic-curve additions.
-                __builtin_prefetch(points[n], 0, 3);
+                // dependent sequence of elliptic-curve additions.
+                __builtin_prefetch(pts[n], 0, 3);
                 ++n;
             }
         }
-        secp256k1_pubkey result;
-        if (!secp256k1_ec_pubkey_combine(ctx, &result, points.data(), n)) throw std::runtime_error("BC3 point combination failed");
-        std::array<unsigned char, 65> encoded;
-        std::size_t length = encoded.size();
-        if (!secp256k1_ec_pubkey_serialize(ctx, encoded.data(), &length, &result, SECP256K1_EC_UNCOMPRESSED)) throw std::runtime_error("BC3 point serialization failed");
-        return {U256::load(encoded.data() + 1), U256::load(encoded.data() + 33)};
+        return n;
+    }
+    std::pair<U256, U256> operator()(U256 k) const
+    {
+        const void* pts[1][BC3EC_MAX_POINTS];
+        unsigned n = points(k, pts[0]);
+        if (!n) return {INVALID_POINT_x, INVALID_POINT_y};
+        bc3ec_affine r;
+        if (bc3ec_sum(&r, pts, &n, 1)) throw std::runtime_error("BC3 point combination failed");
+        return from_affine(r);
     }
 };
 struct Tables {
@@ -113,12 +110,127 @@ struct Tables {
     FixedPower<F256> pow256{g256};
     std::array<CurveTable, 4> curve{{{H_x, H_y}, {J_x, J_y}, {K_x, K_y}, {L_x, L_y}}};
 };
+// k[i]*P_(i%4) for M scalars at once; each bc3ec_sum call shares one
+// inversion across up to BC3EC_MAX_SUMS of them.
+template <std::size_t M>
+std::array<std::pair<U256, U256>, M> curve_mult(const Tables& t, const std::array<U256, M>& k)
+{
+    std::array<std::pair<U256, U256>, M> r;
+    for (std::size_t base = 0; base < M; base += BC3EC_MAX_SUMS) {
+        const void* pts[BC3EC_MAX_SUMS][BC3EC_MAX_POINTS];
+        unsigned n[BC3EC_MAX_SUMS], slot[BC3EC_MAX_SUMS], sums = 0;
+        for (std::size_t i = base; i < M && i < base + BC3EC_MAX_SUMS; ++i) {
+            n[sums] = t.curve[i % 4].points(k[i], pts[sums]);
+            if (n[sums])
+                slot[sums++] = unsigned(i);
+            else
+                r[i] = {INVALID_POINT_x, INVALID_POINT_y};
+        }
+        if (sums) {
+            bc3ec_affine a[BC3EC_MAX_SUMS];
+            if (bc3ec_sum(a, pts, n, sums)) throw std::runtime_error("BC3 point combination failed");
+            for (unsigned s = 0; s < sums; ++s)
+                r[slot[s]] = from_affine(a[s]);
+        }
+    }
+    return r;
+}
+std::array<std::pair<U256, U256>, 4> curve_mult4(const Tables& t, const std::array<U256, 4>& k)
+{
+    return curve_mult<4>(t, k);
+}
 const Tables& tables()
 {
     // Never destroyed, same reason as context(): exit() runs static destructors
     // while miner threads still read the tables.
     static const Tables& t = *new Tables;
     return t;
+}
+// k*P through curvehash's 2015 libsecp256k1, whose own scalar multiplication
+// (ecmult) shares nothing with the tables or bc3hash-ec.c.
+std::pair<U256, U256> reference_mult(const secp256k1_context* ctx, const CurveTable& c, U256 k)
+{
+    if (k >= curve_order) k = k - curve_order;
+    if (k.zero()) return {INVALID_POINT_x, INVALID_POINT_y};
+    std::array<unsigned char, 65> encoded{};
+    std::array<unsigned char, 32> scalar;
+    encoded[0] = 4;
+    c.base_x.store(encoded.data() + 1);
+    c.base_y.store(encoded.data() + 33);
+    k.store(scalar.data());
+    secp256k1_pubkey point;
+    std::size_t length = encoded.size();
+    if (!secp256k1_ec_pubkey_parse(ctx, &point, encoded.data(), 65) ||
+        !secp256k1_ec_pubkey_tweak_mul(ctx, &point, scalar.data()) ||
+        !secp256k1_ec_pubkey_serialize(ctx, encoded.data(), &length, &point, SECP256K1_EC_UNCOMPRESSED))
+        throw std::runtime_error("BC3 reference point operation failed");
+    return {U256::load(encoded.data() + 1), U256::load(encoded.data() + 33)};
+}
+// Startup differential against reference_mult on every table, through every
+// batch width mining uses: a wrong table entry or kernel only shows for the
+// scalars that reach it, so the KAT alone is not enough.
+bool ec_self_test(const Tables& t)
+{
+    secp256k1_context* ctx = secp256k1_context_create(SECP256K1_CONTEXT_VERIFY);
+    if (!ctx) throw std::bad_alloc();
+    const unsigned w = t.curve[0].window;
+    U256 ones;
+    ones.v = {~0ULL, ~0ULL, ~0ULL, ~0ULL};
+    std::vector<U256> ks = {U256(1), U256(2), U256(3), U256((1ULL << w) - 1), U256(1ULL << w),
+                            U256((1ULL << w) + 1), curve_order - U256(1), curve_order - U256(2),
+                            curve_order, curve_order + U256(1), ones, U256{}};
+    std::uint64_t s = 0x9e3779b97f4a7c15ULL;
+    for (unsigned i = 0; i < 40; ++i) {
+        U256 k;
+        for (auto& x : k.v) {
+            s += 0x9e3779b97f4a7c15ULL; // splitmix64
+            std::uint64_t z = s;
+            z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+            x = z ^ (z >> 31);
+        }
+        ks.push_back(k);
+    }
+    // Also one digit value in every row at once: row ends and bc3ec_row's
+    // chunk boundaries, which random scalars rarely reach.
+    const auto& c0 = t.curve[0];
+    for (unsigned d : {1u, 2u, 4095u, 4096u, 4097u, 8192u, c0.entries - 1, c0.entries}) {
+        if (d > c0.entries) continue;
+        U256 k;
+        for (unsigned i = 0; i < c0.digits; ++i) {
+            const unsigned pos = i * w, limb = pos / 64, shift = pos % 64;
+            const std::uint64_t v = d & (i + 1 == c0.digits ? c0.last_entries : c0.entries);            k.v[limb] |= v << shift;
+            if (shift + w > 64 && limb + 1 < 4) k.v[limb + 1] |= v >> (64 - shift);
+        }
+        ks.push_back(k);
+    }
+    bool ok = true;
+    try {
+        for (std::size_t i = 0; i < ks.size() && ok; ++i) {
+            std::array<U256, 4> k;
+            for (unsigned c = 0; c < 4; ++c)
+                k[c] = ks[(i + c) % ks.size()];
+            const auto got = curve_mult4(t, k);
+            for (unsigned c = 0; c < 4; ++c) {
+                const auto want = reference_mult(ctx, t.curve[c], k[c]);
+                ok = ok && got[c] == want && t.curve[c](k[c]) == want;
+            }
+        }
+        // Mining-width batches (bc3ec_sum's 8-sum paths), mixed digit counts.
+        for (std::size_t i = 0; i < ks.size() && ok; i += 3) {
+            std::array<U256, BC3EC_MAX_SUMS> k;
+            for (unsigned c = 0; c < BC3EC_MAX_SUMS; ++c)
+                k[c] = ks[(i + 5 * c) % ks.size()];
+            const auto got = curve_mult<BC3EC_MAX_SUMS>(t, k);
+            for (unsigned c = 0; c < BC3EC_MAX_SUMS; ++c)
+                ok = ok && got[c] == reference_mult(ctx, t.curve[c % 4], k[c]);
+        }
+    } catch (...) {
+        secp256k1_context_destroy(ctx);
+        throw;
+    }
+    secp256k1_context_destroy(ctx);
+    return ok;
 }
 // Coefficients stay in [0,p). This is variable-time arithmetic on public
 // hash inputs, never a secret-key primitive.
@@ -302,7 +414,56 @@ U256 inverse256(U256 a)
     }
     return u == one ? x : y;
 }
-static Digest mix512(const void* input, unsigned folded)
+// inverse256 of N values with one inversion (Montgomery's trick). A zero
+// keeps inverse256's convention (0 -> 0) and stays out of the product.
+template <unsigned N>
+std::array<U256, N> inverse256_lanes(const std::array<U256, N>& a)
+{
+    std::array<U256, N> x, prefix, r;
+    U256 acc(1);
+    for (unsigned l = 0; l < N; ++l) {
+        x[l] = F256::normalize(a[l]);
+        prefix[l] = acc;
+        if (!x[l].zero()) acc = F256::mul(acc, x[l]);
+    }
+    U256 inv = inverse256(acc);
+    for (unsigned l = N; l--;) {
+        if (x[l].zero()) {
+            r[l] = U256{};
+            continue;
+        }
+        r[l] = F256::mul(inv, prefix[l]);
+        inv = F256::mul(inv, x[l]);
+    }
+    return r;
+}
+// out[i] = exp256(in[i]) for n values: IFMA 16 at a time where built, else
+// the scalar pair (two chains for ILP). On AVX2 builds without the mulx asm,
+// gcc would inline it into mix_lanes and leave its multiplies as calls there.
+#if defined(__AVX2__) && !defined(BC3_MULX4)
+__attribute__((noinline))
+#endif
+static void exp256_many(const U256* in, U256* out, unsigned n)
+{
+    unsigned i = 0;
+#ifdef BC3_IFMA_EXP
+    for (; i + 16 <= n; i += 16)
+        ifma::exp_groups<2>(exp256, in + i, out + i);
+#endif
+    for (; i + 2 <= n; i += 2) {
+        const auto p = exp256.pair(in[i], in[i + 1]);
+        out[i] = p.first;
+        out[i + 1] = p.second;
+    }
+    if (i < n) out[i] = exp256(in[i]);
+}
+// BC3Mix up to the 256-bit rounds: everything there is per nonce and needs
+// no batching.
+struct MixFront {
+    U256 h1, h2;
+    std::array<U256, 16> m; // m256[48..63]
+};
+static void mix_front(const void* input, unsigned folded, MixFront& out)
 {
     const auto& t = tables();
     const auto* bytes = static_cast<const std::uint8_t*>(input);
@@ -366,39 +527,86 @@ static Digest mix512(const void* input, unsigned folded)
         f2 = f1 + c + beta(d);
         f1 = b + Sig0(a ^ c ^ d);
     }
-    U256 h1, h2;
-    h1.v = {f3.v[0], f3.v[1], f1.v[0], f1.v[1]};
-    h2.v = {f4.v[0], f4.v[1], f2.v[0], f2.v[1]};
+    out.h1.v = {f3.v[0], f3.v[1], f1.v[0], f1.v[1]};
+    out.h2.v = {f4.v[0], f4.v[1], f2.v[0], f2.v[1]};
+    for (unsigned i = 0; i < 16; ++i)
+        out.m[i] = m256[48 + i];
+}
+// BC3Mix for N inputs in lockstep. Each nonce's arithmetic is unchanged; the
+// lanes share inversions: a round's 4N curve mults and each final step's k2.
+template <unsigned N>
+static void mix_lanes(const void* const* input, unsigned folded, Digest* out)
+{
+    const auto& t = tables();
+    std::array<MixFront, N> s;
+    for (unsigned l = 0; l < N; ++l)
+        mix_front(input[l], folded, s[l]);
     for (unsigned i = 0; i < 16; ++i) {
-        auto powers = exp256.pair(rol<11>(h1) ^ h2, h1 ^ beta(~h2));
-        auto j1 = powers.first + beta(h1 ^ h2);
-        auto j2 = powers.second + gamma(h1, h2);
-        powers = exp256.pair(j1, j2);
-        auto j3 = gamma(j1, j2) + powers.first + round256[i];
-        auto j4 = gamma(j3, beta(h2)) + powers.second + m256[48 + i] + ch(j1, j2, j3);
-        const std::pair<U256, U256> p5 = t.curve[0](h1);
-        const std::pair<U256, U256> p6 = t.curve[1](h2);
-        const std::pair<U256, U256> p7 = t.curve[2](j1);
-        const std::pair<U256, U256> p8 = t.curve[3](j3);
-        const U256 j5 = p5.first, j6 = p5.second;
-        const U256 j7 = p6.first, j8 = p6.second;
-        const U256 j9 = p7.first, j10 = p7.second;
-        const U256 j11 = p8.first, j12 = p8.second;
-        h2 = h1 + gamma(j1, j3) + maj(j2, j3, j4) + j5 + j8 + ch(j1, j6, j7) + beta(j10) + j11;
-        h1 = beta(j2) + gamma(j3, j4) + Sig1(M256::mul(j1, j2)) + maj(j7, j6, j5) + Sig0(j9) + j12;
+        std::array<U256, N> j1, j2, j3, j4;
+        std::array<U256, 4 * N> k;
+        // Two exp256 per lane per stage, all lanes' at once: x[2l], x[2l+1].
+        std::array<U256, 2 * N> x, y;
+        for (unsigned l = 0; l < N; ++l) {
+            const U256 h1 = s[l].h1, h2 = s[l].h2;
+            x[2 * l] = rol<11>(h1) ^ h2;
+            x[2 * l + 1] = h1 ^ beta(~h2);
+        }
+        exp256_many(x.data(), y.data(), 2 * N);
+        for (unsigned l = 0; l < N; ++l) {
+            const U256 h1 = s[l].h1, h2 = s[l].h2;
+            j1[l] = y[2 * l] + beta(h1 ^ h2);
+            j2[l] = y[2 * l + 1] + gamma(h1, h2);
+            x[2 * l] = j1[l];
+            x[2 * l + 1] = j2[l];
+        }
+        exp256_many(x.data(), y.data(), 2 * N);
+        for (unsigned l = 0; l < N; ++l) {
+            const U256 h1 = s[l].h1, h2 = s[l].h2;
+            j3[l] = gamma(j1[l], j2[l]) + y[2 * l] + round256[i];
+            j4[l] = gamma(j3[l], beta(h2)) + y[2 * l + 1] + s[l].m[i] + ch(j1[l], j2[l], j3[l]);
+            // Table order H, J, K, L: k[4l + c] uses curve c (curve_mult takes i % 4).
+            k[4 * l] = h1;
+            k[4 * l + 1] = h2;
+            k[4 * l + 2] = j1[l];
+            k[4 * l + 3] = j3[l];
+        }
+        const auto p = curve_mult<4 * N>(t, k);
+        for (unsigned l = 0; l < N; ++l) {
+            const U256 j5 = p[4 * l].first, j6 = p[4 * l].second;
+            const U256 j7 = p[4 * l + 1].first, j8 = p[4 * l + 1].second;
+            const U256 j9 = p[4 * l + 2].first, j10 = p[4 * l + 2].second;
+            const U256 j11 = p[4 * l + 3].first, j12 = p[4 * l + 3].second;
+            const U256 h1 = s[l].h1;
+            s[l].h2 = h1 + gamma(j1[l], j3[l]) + maj(j2[l], j3[l], j4[l]) + j5 + j8 + ch(j1[l], j6, j7) + beta(j10) + j11;
+            s[l].h1 = beta(j2[l]) + gamma(j3[l], j4[l]) + Sig1(M256::mul(j1[l], j2[l])) + maj(j7, j6, j5) + Sig0(j9) + j12;
+        }
     }
-    auto u1 = h1, u2 = h2 + U256(folded);
+    std::array<U256, N> u1, u2, k1, k2;
+    for (unsigned l = 0; l < N; ++l) {
+        u1[l] = s[l].h1;
+        u2[l] = s[l].h2 + U256(folded);
+    }
     for (const auto& fc : final) {
-        auto powers = t.pow256.pair(u1, u2);
-        auto k1 = powers.first + beta(u2);
-        auto k2 = powers.second + gamma(u1, u2) + ch(k1, u2, u1);
-        auto k3 = inverse256(k2) + beta(u1) + beta(u2 ^ k1 ^ fc);
-        u2 = (k1 ^ u1) + maj(k1, k2, u2) + beta(k3);
-        u1 = beta(k1) + k2;
+        for (unsigned l = 0; l < N; ++l) {
+            auto powers = t.pow256.pair(u1[l], u2[l]);
+            k1[l] = powers.first + beta(u2[l]);
+            k2[l] = powers.second + gamma(u1[l], u2[l]) + ch(k1[l], u2[l], u1[l]);
+        }
+        const auto inv = inverse256_lanes<N>(k2);
+        for (unsigned l = 0; l < N; ++l) {
+            auto k3 = inv[l] + beta(u1[l]) + beta(u2[l] ^ k1[l] ^ fc);
+            u2[l] = (k1[l] ^ u1[l]) + maj(k1[l], k2[l], u2[l]) + beta(k3);
+            u1[l] = beta(k1[l]) + k2[l];
+        }
     }
-    Digest result;
-    (u1 + beta(u2)).store(result.data());
-    return result;
+    for (unsigned l = 0; l < N; ++l)
+        (u1[l] + beta(u2[l])).store(out[l].data());
+}
+static Digest mix512(const void* input, unsigned folded)
+{
+    Digest d;
+    mix_lanes<1>(&input, folded, &d);
+    return d;
 }
 } } // namespace bc3::detail
 
@@ -438,11 +646,16 @@ struct State {
         blake_s.update(data, n);
         blake_b.update(data, n);
     }
+    // BC3Mix's input.
+    void preimage(Block512& p) { sha3_512.finish(p.data()); }
     Digest finish()
     {
-        Block512 preimage;
-        sha3_512.finish(preimage.data());
-        const Digest mix = detail::mix512(preimage.data(), 0);
+        Block512 p;
+        preimage(p);
+        return finish(detail::mix512(p.data(), 0));
+    }
+    Digest finish(const Digest& mix)
+    {
         std::array<std::uint8_t, 48> s384;
         sha3_384.finish(s384.data());
         const auto s512 = sha512.finish();
@@ -467,6 +680,23 @@ Digest bc3hash(const void* data, std::size_t n)
     State state;
     state.update(data, n);
     return state.finish();
+}
+// N inputs of n bytes each, hashed with BC3Mix in lockstep (see mix_lanes).
+template <unsigned N>
+void bc3hash_lanes(const void* const* data, std::size_t n, Digest* out)
+{
+    std::array<State, N> state;
+    std::array<Block512, N> pre;
+    const void* mix_in[N];
+    for (unsigned l = 0; l < N; ++l) {
+        state[l].update(data[l], n);
+        state[l].preimage(pre[l]);
+        mix_in[l] = pre[l].data();
+    }
+    std::array<Digest, N> mix;
+    detail::mix_lanes<N>(mix_in, 0, mix.data());
+    for (unsigned l = 0; l < N; ++l)
+        out[l] = state[l].finish(mix[l]);
 }
 } // namespace bc3
 
@@ -493,7 +723,7 @@ std::uint64_t bc3_hash_table_bytes(unsigned window)
     const unsigned rest = 256 - window * (digits - 1);
     const std::uint64_t last = (1ULL << rest) - 1;
     return 4ULL * ((std::uint64_t)(digits - 1) * entries + last)
-           * sizeof(secp256k1_pubkey);
+           * BC3EC_ENTRY_BYTES;
 }
 
 /* The window the tables will actually be built at, default included. */
@@ -505,12 +735,42 @@ unsigned bc3_hash_get_window(void)
 int bc3_hash_init_cxx(void)
 {
     try {
-        (void)bc3::detail::tables();
+        const auto& t = bc3::detail::tables();
         bc3::detail::tables_frozen = true;
-        return 0;
+        return bc3::detail::ec_self_test(t) ? 0 : -4;
     } catch (const std::bad_alloc&) { return -1; }        /* secp context / table alloc */
     catch (const std::exception&) { return -2; }         /* curve constant or point op */
     catch (...) { return -3; }
+}
+/* exp256 path this TU compiled to, for the startup log. */
+const char* bc3_hash_exp_path(void)
+{
+#ifdef BC3_IFMA_EXP
+    return "AVX-512 IFMA, 8 lanes x 5x52";
+#else
+    return "scalar";
+#endif
+}
+/* Nonces per bc3_hash_lanes_cxx() call. */
+unsigned bc3_hash_lanes(void)
+{
+    return BC3HASH_LANES;
+}
+/* BC3HASH_LANES inputs of len bytes, back to back in data; digests back to
+ * back in out. Same digests as bc3_hash_cxx() on each input. */
+int bc3_hash_lanes_cxx(const void* data, std::uint32_t len, unsigned char* out)
+{
+    if (!out || !data) return -1;
+    try {
+        const void* in[BC3HASH_LANES];
+        for (unsigned l = 0; l < BC3HASH_LANES; ++l)
+            in[l] = static_cast<const unsigned char*>(data) + std::size_t(l) * len;
+        bc3::Digest d[BC3HASH_LANES];
+        bc3::bc3hash_lanes<BC3HASH_LANES>(in, len, d);
+        for (unsigned l = 0; l < BC3HASH_LANES; ++l)
+            for (std::uint32_t i = 0; i < 32; ++i) out[32 * l + i] = d[l][i];
+        return 0;
+    } catch (...) { return -1; }
 }
 int bc3_hash_cxx(const void* data, std::uint32_t len, unsigned char* out)
 {

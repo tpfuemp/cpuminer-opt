@@ -3,6 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <utility>
+#if defined(__x86_64__) && defined(__BMI2__) && defined(__ADX__)
+#include <immintrin.h>
+#endif
 
 namespace bc3 {
 namespace detail {
@@ -120,26 +123,45 @@ using U64 = UInt<1>;
 using U128 = UInt<2>;
 using U256 = UInt<4>;
 
+// Limb shifts and rotations as straight-line code: as loops, gcc vectorizes
+// the (i + K) % L limb index into slow gathers on AVX2/AVX-512 targets.
+template <unsigned N, std::size_t L>
+inline std::uint64_t shr_limb(const UInt<L>& a, std::size_t i)
+{
+    std::uint64_t r = i + N / 64 < L ? a.v[i + N / 64] >> (N % 64) : 0;
+    if (N % 64 && i + N / 64 + 1 < L) r |= a.v[i + N / 64 + 1] << ((64 - N % 64) % 64);
+    return r;
+}
+template <unsigned N, std::size_t L, std::size_t... I>
+inline UInt<L> shr_impl(const UInt<L>& a, std::index_sequence<I...>)
+{
+    UInt<L> r;
+    ((r.v[I] = shr_limb<N, L>(a, I)), ...);
+    return r;
+}
 template <unsigned N, std::size_t L>
 inline UInt<L> shr(const UInt<L>& a)
 {
+    return shr_impl<N, L>(a, std::make_index_sequence<L>{});
+}
+template <unsigned N, std::size_t L, std::size_t I>
+inline std::uint64_t ror_limb(const UInt<L>& a)
+{
+    std::uint64_t r = a.v[(I + N / 64) % L] >> (N % 64);
+    if (N % 64) r |= a.v[(I + N / 64 + 1) % L] << ((64 - N % 64) % 64);
+    return r;
+}
+template <unsigned N, std::size_t L, std::size_t... I>
+inline UInt<L> ror_impl(const UInt<L>& a, std::index_sequence<I...>)
+{
     UInt<L> r;
-    for (std::size_t i = 0; i < L; ++i) {
-        if (i + N / 64 < L) r.v[i] = a.v[i + N / 64] >> (N % 64);
-        if (N % 64)
-            if (i + N / 64 + 1 < L) r.v[i] |= a.v[i + N / 64 + 1] << (64 - N % 64);
-    }
+    ((r.v[I] = ror_limb<N, L, I>(a)), ...);
     return r;
 }
 template <unsigned N, std::size_t L>
 inline UInt<L> ror(const UInt<L>& a)
 {
-    UInt<L> r;
-    for (std::size_t i = 0; i < L; ++i) {
-        r.v[i] = a.v[(i + N / 64) % L] >> (N % 64);
-        if (N % 64) r.v[i] |= a.v[(i + N / 64 + 1) % L] << (64 - N % 64);
-    }
-    return r;
+    return ror_impl<N, L>(a, std::make_index_sequence<L>{});
 }
 template <unsigned N, std::size_t L>
 inline UInt<L> rol(const UInt<L>& a)
@@ -202,6 +224,197 @@ inline UInt<L> gamma(const UInt<L>& x, const UInt<L>& y)
                                                     32};
     return x ^ beta(y) ^ ror<right_rotation>(y) ^ rol<left_rotation>(sig1(x)) ^ shr<shift>(y);
 }
+// x86-64 BMI2+ADX: 4-limb product and 2^256-C reduction with mulx and
+// explicit carry chains; gcc spills the portable __int128 forms.
+#if defined(__x86_64__) && defined(__BMI2__) && defined(__ADX__)
+#define BC3_MULX4 1
+using ull = unsigned long long;
+// t[0..4] (+)= ai * b, t[4] written fresh.
+__attribute__((always_inline)) inline void mulx_row(std::uint64_t ai, const std::array<std::uint64_t, 4>& b, std::uint64_t* t, bool first)
+{
+    ull h0, h1, h2, h3;
+    ull l0 = _mulx_u64(ai, b[0], &h0);
+    ull l1 = _mulx_u64(ai, b[1], &h1);
+    ull l2 = _mulx_u64(ai, b[2], &h2);
+    ull l3 = _mulx_u64(ai, b[3], &h3);
+    unsigned char c = _addcarry_u64(0, l1, h0, &l1);
+    c = _addcarry_u64(c, l2, h1, &l2);
+    c = _addcarry_u64(c, l3, h2, &l3);
+    h3 += c;
+    if (first) {
+        t[0] = l0; t[1] = l1; t[2] = l2; t[3] = l3; t[4] = h3;
+        return;
+    }
+    ull r0, r1, r2, r3;
+    c = _addcarry_u64(0, t[0], l0, &r0);
+    c = _addcarry_u64(c, t[1], l1, &r1);
+    c = _addcarry_u64(c, t[2], l2, &r2);
+    c = _addcarry_u64(c, t[3], l3, &r3);
+    t[0] = r0; t[1] = r1; t[2] = r2; t[3] = r3; t[4] = h3 + c;
+}
+__attribute__((always_inline)) inline std::array<std::uint64_t, 8> mulx4(const std::array<std::uint64_t, 4>& a, const std::array<std::uint64_t, 4>& b)
+{
+    std::array<std::uint64_t, 8> t;
+    mulx_row(a[0], b, &t[0], true);
+    mulx_row(a[1], b, &t[1], false);
+    mulx_row(a[2], b, &t[2], false);
+    mulx_row(a[3], b, &t[3], false);
+    return t;
+}
+template <std::uint64_t C>
+__attribute__((always_inline)) inline std::array<std::uint64_t, 4> reducex4(const std::array<std::uint64_t, 8>& t)
+{
+    ull q0, q1, q2, q3, r0, r1, r2, r3;
+    ull p0 = _mulx_u64(t[4], C, &q0);
+    ull p1 = _mulx_u64(t[5], C, &q1);
+    ull p2 = _mulx_u64(t[6], C, &q2);
+    ull p3 = _mulx_u64(t[7], C, &q3);
+    unsigned char c = _addcarry_u64(0, p1, q0, &p1);
+    c = _addcarry_u64(c, p2, q1, &p2);
+    c = _addcarry_u64(c, p3, q2, &p3);
+    q3 += c;
+    c = _addcarry_u64(0, t[0], p0, &r0);
+    c = _addcarry_u64(c, t[1], p1, &r1);
+    c = _addcarry_u64(c, t[2], p2, &r2);
+    c = _addcarry_u64(c, t[3], p3, &r3);
+    const ull top = q3 + c; // <= C
+    c = _addcarry_u64(0, r0, top * C, &r0);
+    c = _addcarry_u64(c, r1, 0, &r1);
+    c = _addcarry_u64(c, r2, 0, &r2);
+    c = _addcarry_u64(c, r3, 0, &r3);
+    if (c) r0 += C; // r is tiny here, so this cannot carry
+    // normalize: r >= 2^256 - C only if the top three limbs are all ones
+    if ((r1 & r2 & r3) == ~0ULL && r0 >= 0 - C) r0 += C, r1 = r2 = r3 = 0;
+    return {r0, r1, r2, r3};
+}
+// Needs 13 free GPRs: unoptimized builds (frame pointer, operand copies)
+// cannot satisfy the constraints, so they keep the intrinsic version.
+#if !defined(BC3HASH_NO_ASM_MUL) && defined(__OPTIMIZE__)
+#define BC3_ASM_MUL4 1
+// a*b mod 2^256-C in one asm block, canonical result, all in registers (the
+// intrinsic version above spills). mulx rows on two carry chains (adox: low
+// halves, adcx: high halves) with rotating accumulators, two folds of the
+// high half, then one branch-free subtract of p.
+template <std::uint64_t C>
+__attribute__((always_inline)) inline std::array<std::uint64_t, 4> mulmod_asm(const std::uint64_t* a, const std::uint64_t* b)
+{
+    static_assert(C < (1u << 31), "C must fit a sign-extended imm32");
+    std::uint64_t r0, r1, r2, r3, r4, s0, s1, s2, lo, hi;
+    __asm__(
+        // row 0: t0..t4 = a0*b
+        "movq   (%[a]), %%rdx\n\t"
+        "mulx   (%[b]), %[r0], %[r1]\n\t"
+        "mulx  8(%[b]), %[lo], %[r2]\n\t"
+        "addq   %[lo], %[r1]\n\t"
+        "mulx 16(%[b]), %[lo], %[r3]\n\t"
+        "adcq   %[lo], %[r2]\n\t"
+        "mulx 24(%[b]), %[lo], %[r4]\n\t"
+        "adcq   %[lo], %[r3]\n\t"
+        "adcq   $0, %[r4]\n\t"
+        "movq   %[r0], %[s0]\n\t"
+        // row 1: t1..t4 += a1*b, t5 -> r0
+        "movq  8(%[a]), %%rdx\n\t"
+        "xorl   %k[lo], %k[lo]\n\t"
+        "mulx   (%[b]), %[lo], %[hi]\n\t"
+        "adox   %[lo], %[r1]\n\t"
+        "adcx   %[hi], %[r2]\n\t"
+        "mulx  8(%[b]), %[lo], %[hi]\n\t"
+        "adox   %[lo], %[r2]\n\t"
+        "adcx   %[hi], %[r3]\n\t"
+        "mulx 16(%[b]), %[lo], %[hi]\n\t"
+        "adox   %[lo], %[r3]\n\t"
+        "adcx   %[hi], %[r4]\n\t"
+        "mulx 24(%[b]), %[lo], %[r0]\n\t"
+        "adox   %[lo], %[r4]\n\t"
+        "movl   $0, %k[lo]\n\t"
+        "adcx   %[lo], %[r0]\n\t"
+        "adox   %[lo], %[r0]\n\t"
+        "movq   %[r1], %[s1]\n\t"
+        // row 2: t2..t5 += a2*b, t6 -> r1
+        "movq 16(%[a]), %%rdx\n\t"
+        "xorl   %k[lo], %k[lo]\n\t"
+        "mulx   (%[b]), %[lo], %[hi]\n\t"
+        "adox   %[lo], %[r2]\n\t"
+        "adcx   %[hi], %[r3]\n\t"
+        "mulx  8(%[b]), %[lo], %[hi]\n\t"
+        "adox   %[lo], %[r3]\n\t"
+        "adcx   %[hi], %[r4]\n\t"
+        "mulx 16(%[b]), %[lo], %[hi]\n\t"
+        "adox   %[lo], %[r4]\n\t"
+        "adcx   %[hi], %[r0]\n\t"
+        "mulx 24(%[b]), %[lo], %[r1]\n\t"
+        "adox   %[lo], %[r0]\n\t"
+        "movl   $0, %k[lo]\n\t"
+        "adcx   %[lo], %[r1]\n\t"
+        "adox   %[lo], %[r1]\n\t"
+        "movq   %[r2], %[s2]\n\t"
+        // row 3: t3..t6 += a3*b, t7 -> r2. Now t0..t3 = s0 s1 s2 r3, t4..t7 = r4 r0 r1 r2
+        "movq 24(%[a]), %%rdx\n\t"
+        "xorl   %k[lo], %k[lo]\n\t"
+        "mulx   (%[b]), %[lo], %[hi]\n\t"
+        "adox   %[lo], %[r3]\n\t"
+        "adcx   %[hi], %[r4]\n\t"
+        "mulx  8(%[b]), %[lo], %[hi]\n\t"
+        "adox   %[lo], %[r4]\n\t"
+        "adcx   %[hi], %[r0]\n\t"
+        "mulx 16(%[b]), %[lo], %[hi]\n\t"
+        "adox   %[lo], %[r0]\n\t"
+        "adcx   %[hi], %[r1]\n\t"
+        "mulx 24(%[b]), %[lo], %[r2]\n\t"
+        "adox   %[lo], %[r1]\n\t"
+        "movl   $0, %k[lo]\n\t"
+        "adcx   %[lo], %[r2]\n\t"
+        "adox   %[lo], %[r2]\n\t"
+        // fold: (s0 s1 s2 r3) += C*(r4 r0 r1 r2); the top word lands in r4, <= C+1
+        "movq   %[c], %%rdx\n\t"
+        "xorl   %k[lo], %k[lo]\n\t"
+        "mulx   %[r4], %[lo], %[hi]\n\t"
+        "adox   %[lo], %[s0]\n\t"
+        "adcx   %[hi], %[s1]\n\t"
+        "mulx   %[r0], %[lo], %[hi]\n\t"
+        "adox   %[lo], %[s1]\n\t"
+        "adcx   %[hi], %[s2]\n\t"
+        "mulx   %[r1], %[lo], %[hi]\n\t"
+        "adox   %[lo], %[s2]\n\t"
+        "adcx   %[hi], %[r3]\n\t"
+        "mulx   %[r2], %[lo], %[r4]\n\t"
+        "adox   %[lo], %[r3]\n\t"
+        "movl   $0, %k[lo]\n\t"
+        "adcx   %[lo], %[r4]\n\t"
+        "adox   %[lo], %[r4]\n\t"
+        // second fold: top*C < 2^35; a carry out leaves r < 2^35, so + C cannot carry
+        "imulq  %[c], %[r4], %[r4]\n\t"
+        "addq   %[r4], %[s0]\n\t"
+        "adcq   $0, %[s1]\n\t"
+        "adcq   $0, %[s2]\n\t"
+        "adcq   $0, %[r3]\n\t"
+        "sbbq   %[lo], %[lo]\n\t"
+        "andq   %[c], %[lo]\n\t"
+        "addq   %[lo], %[s0]\n\t"
+        // canonical: if r + C carries, r >= p, so r - p = r + C mod 2^256
+        "movq   %[s0], %[r0]\n\t"
+        "addq   %[c], %[r0]\n\t"
+        "movq   %[s1], %[r1]\n\t"
+        "adcq   $0, %[r1]\n\t"
+        "movq   %[s2], %[r2]\n\t"
+        "adcq   $0, %[r2]\n\t"
+        "movq   %[r3], %[r4]\n\t"
+        "adcq   $0, %[r4]\n\t"
+        "cmovcq %[r0], %[s0]\n\t"
+        "cmovcq %[r1], %[s1]\n\t"
+        "cmovcq %[r2], %[s2]\n\t"
+        "cmovcq %[r4], %[r3]\n\t"
+        : [r0] "=&r"(r0), [r1] "=&r"(r1), [r2] "=&r"(r2), [r3] "=&r"(r3), [r4] "=&r"(r4),
+          [s0] "=&r"(s0), [s1] "=&r"(s1), [s2] "=&r"(s2), [lo] "=&r"(lo), [hi] "=&r"(hi)
+        : [a] "r"(a), [b] "r"(b), [c] "i"(C)
+        // "memory", not "m" operands for a[] and b[]: clang gives each "m"
+        // its own address register, and 13 + 2 GPRs can fail to allocate.
+        : "rdx", "cc", "memory");
+    (void)r0; (void)r1; (void)r2; (void)r4; (void)hi;
+    return {s0, s1, s2, r3};
+}
+#endif
+#endif
 // All algorithm moduli have the form 2^(64*L)-C, with small C.
 // Two carry folds suffice: the first carry is <= C, the next <= 1.
 template <std::size_t L, std::uint64_t C>
@@ -234,7 +447,26 @@ struct Mod {
         if (carry) r = r + U(C);
         return normalize(r);
     }
-    static U mul(const U& a, const U& b)
+    // Forced inline: otherwise gcc may leave every multiply in
+    // FixedExponent::pair's loop as a call.
+    __attribute__((always_inline)) static U mul(const U& a, const U& b)
+    {
+#ifdef BC3_MULX4
+        if constexpr (L == 4) {
+            U r;
+#ifdef BC3_ASM_MUL4
+            r.v = mulmod_asm<C>(a.v.data(), b.v.data());
+#else
+            r.v = reducex4<C>(mulx4(a.v, b.v));
+#endif
+            return r;
+        }
+#endif
+        return mul_rows(a, b);
+    }
+    // Portable row-wise product. FixedPower uses it even where mul takes the
+    // mulx path: gcc overlaps its two table chains far better with it.
+    static U mul_rows(const U& a, const U& b)
     {
         std::array<std::uint64_t, 2 * L> t{};
         for (std::size_t i = 0; i < L; ++i) {
@@ -247,7 +479,7 @@ struct Mod {
         }
         return reduce(t);
     }
-    static U square(const U& a) { return mul(a, a); }
+    __attribute__((always_inline)) static U square(const U& a) { return mul(a, a); }
     // Sliding window, exponent is public and fixed for these calls.
     static U pow(U a, const U& e)
     {
@@ -383,15 +615,15 @@ struct alignas(64) FixedPower {
     {
         U r = table[0][e.byte(0)];
         for (std::size_t i = 1; i < bytes; ++i)
-            r = M::mul(r, table[i][e.byte(i)]);
+            r = M::mul_rows(r, table[i][e.byte(i)]);
         return r;
     }
     std::pair<U, U> pair(const U& a, const U& b) const
     {
         U r = table[0][a.byte(0)], s = table[0][b.byte(0)];
         for (std::size_t i = 1; i < bytes; ++i) {
-            r = M::mul(r, table[i][a.byte(i)]);
-            s = M::mul(s, table[i][b.byte(i)]);
+            r = M::mul_rows(r, table[i][a.byte(i)]);
+            s = M::mul_rows(s, table[i][b.byte(i)]);
         }
         return {r, s};
     }
